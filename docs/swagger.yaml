@@ -1,0 +1,270 @@
+openapi: 3.0.0
+info:
+  title: Social Networking Platform API
+  version: 1.0.0
+  description: |
+    API Gateway for a microservices-based social networking platform.
+    Includes Auth, Users, Posts, Feed, and Notifications services.
+
+servers:
+  - url: http://localhost:5000/api/v1
+
+tags:
+  - name: Auth
+  - name: Users
+  - name: Posts
+  - name: Feed
+  - name: Notifications
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        bio:
+          type: string
+        profilePicture:
+          type: string
+
+    Post:
+      type: object
+      properties:
+        id:
+          type: string
+        authorId:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        message:
+          type: string
+        read:
+          type: boolean
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  /auth/google:
+    get:
+      tags: [Auth]
+      summary: Redirect to Google OAuth
+      responses:
+        '302':
+          description: Redirect to Google login
+
+  /auth/callback:
+    get:
+      tags: [Auth]
+      summary: Handle Google OAuth callback
+      responses:
+        '200':
+          description: JWT token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout user
+      responses:
+        '200':
+          description: Logged out successfully
+
+  /users/{id}:
+    get:
+      tags: [Users]
+      summary: Get user profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User profile retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /users/{id}/follow:
+    post:
+      tags: [Users]
+      summary: Follow a user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Followed successfully
+
+  /users/{id}/unfollow:
+    post:
+      tags: [Users]
+      summary: Unfollow a user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Unfollowed successfully
+
+  /posts:
+    post:
+      tags: [Posts]
+      summary: Create a post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content
+              properties:
+                content:
+                  type: string
+      responses:
+        '201':
+          description: Post created
+
+    get:
+      tags: [Posts]
+      summary: Get all posts
+      responses:
+        '200':
+          description: List of posts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Post'
+
+  /posts/{id}:
+    get:
+      tags: [Posts]
+      summary: Get a single post
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Post details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+
+    put:
+      tags: [Posts]
+      summary: Update a post
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+      responses:
+        '200':
+          description: Post updated
+
+    delete:
+      tags: [Posts]
+      summary: Delete a post
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Post deleted
+
+  /feed:
+    get:
+      tags: [Feed]
+      summary: Get personalized feed
+      responses:
+        '200':
+          description: User feed retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Post'
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: Get user notifications
+      responses:
+        '200':
+          description: Notifications list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Notification'
+
+  /notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark notification as read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Notification marked as read
