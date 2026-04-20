@@ -1,4 +1,4 @@
-
+## Folder Structure
 ```
 Social-Networking-Platform
 ├─ api-gateway
