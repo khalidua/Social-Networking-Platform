@@ -1,3 +1,4 @@
+
 # Local Compose Baseline
 
 This Compose file starts the local Social Networking Platform baseline:
