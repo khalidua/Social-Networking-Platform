@@ -1,38 +1,47 @@
 package middleware
 
 import (
-    "context"
-    "fmt"
-    "math/rand"
-    "net/http"
-    "time"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"net/http"
 )
 
 type contextKey string
 
-const RequestIDKey contextKey = "request_id"
+const (
+	RequestIDKey    contextKey = "request_id"
+	RequestIDHeader string     = "X-Request-ID"
+)
 
 func RequestID(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        requestID := r.Header.Get("X-Request-ID")
-        if requestID == "" {
-            requestID = generateRequestID()
-        }
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.Header.Get(RequestIDHeader)
+		if requestID == "" {
+			requestID = generateRequestID()
+		}
 
-        ctx := context.WithValue(r.Context(), RequestIDKey, requestID)
-        w.Header().Set("X-Request-ID", requestID)
-        next.ServeHTTP(w, r.WithContext(ctx))
-    })
+		ctx := context.WithValue(r.Context(), RequestIDKey, requestID)
+		r = r.WithContext(ctx)
+
+		w.Header().Set(RequestIDHeader, requestID)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func GetRequestID(ctx context.Context) string {
-    if v, ok := ctx.Value(RequestIDKey).(string); ok {
-        return v
-    }
-    return ""
+	value, ok := ctx.Value(RequestIDKey).(string)
+	if !ok {
+		return ""
+	}
+	return value
 }
 
 func generateRequestID() string {
-    rand.New(rand.NewSource(time.Now().UnixNano()))
-    return fmt.Sprintf("req-%d-%06d", time.Now().UnixNano(), rand.Intn(1000000))
+	bytes := make([]byte, 8)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		return "req-fallback"
+	}
+	return "req-" + hex.EncodeToString(bytes)
 }
