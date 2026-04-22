@@ -1,20 +1,43 @@
 package middleware
 
 import (
-    "log"
-    "net/http"
+	"encoding/json"
+	"net/http"
+	"os"
+	"time"
+
+	"social-networking-platform/users-service/internal/apperrors"
+	"social-networking-platform/users-service/internal/apiresponse"
 )
 
-func Recovery(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        defer func() {
-            if rec := recover(); rec != nil {
-                log.Printf("panic recovered request_id=%s err=%v", GetRequestID(r.Context()), rec)
-                w.Header().Set("Content-Type", "application/json")
-                w.WriteHeader(http.StatusInternalServerError)
-                _, _ = w.Write([]byte(`{"success":false,"error":{"code":"INTERNAL_ERROR","message":"internal server error"}}`))
-            }
-        }()
-        next.ServeHTTP(w, r)
-    })
+func Recovery(serviceName string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					entry := map[string]interface{}{
+						"timestamp":  time.Now().UTC().Format(time.RFC3339),
+						"level":      "ERROR",
+						"service":    serviceName,
+						"request_id": GetRequestID(r.Context()),
+						"method":     r.Method,
+						"path":       r.URL.Path,
+						"panic":      rec,
+					}
+					_ = json.NewEncoder(os.Stdout).Encode(entry)
+
+					apiresponse.Error(
+						w,
+						http.StatusInternalServerError,
+						GetRequestID(r.Context()),
+						apperrors.CodeInternalError,
+						"internal server error",
+						nil,
+					)
+				}
+			}()
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }

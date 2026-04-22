@@ -1,52 +1,71 @@
 package httptransport
 
 import (
-    "net/http"
+	"net/http"
+	"strings"
 
-    handlers "social-networking-platform/users-service/internal/handler/http"
-    "social-networking-platform/users-service/internal/middleware"
+	handlers "social-networking-platform/users-service/internal/handler/http"
+	"social-networking-platform/users-service/internal/middleware"
+	"social-networking-platform/users-service/internal/apperrors"
+	"social-networking-platform/users-service/internal/apiresponse"
 )
 
 func NewRouter(serviceName string) http.Handler {
-    mux := http.NewServeMux()
+	mux := http.NewServeMux()
 
-    healthHandler := handlers.NewHealthHandler(serviceName)
-    featureHandler := handlers.NewUserHandler()
+	healthHandler := handlers.NewHealthHandler(serviceName)
+	userHandler := handlers.NewUserHandler()
 
-    mux.HandleFunc("/health", healthHandler.Health)
+	mux.HandleFunc("/health", healthHandler.Health)
 
-    mux.HandleFunc("/api/v1/users/me", func(w http.ResponseWriter, r *http.Request) {
-        switch r.Method {
-        case http.MethodGet:
-            featureHandler.GetMe(w, r)
-        case http.MethodPatch:
-            featureHandler.UpdateMe(w, r)
-        default:
-            http.NotFound(w, r)
-        }
-    })
-    mux.HandleFunc("/api/v1/users/", func(w http.ResponseWriter, r *http.Request) {
-        if len(r.URL.Path) >= len("/api/v1/users/") && r.URL.Path != "/api/v1/users/" {
-            if r.Method == http.MethodGet {
-                featureHandler.GetByID(w, r)
-                return
-            }
-            if r.Method == http.MethodPost && len(r.URL.Path) >= len("/follow") && r.URL.Path[len(r.URL.Path)-7:] == "/follow" {
-                featureHandler.FollowUser(w, r)
-                return
-            }
-            if r.Method == http.MethodDelete && len(r.URL.Path) >= len("/follow") && r.URL.Path[len(r.URL.Path)-7:] == "/follow" {
-                featureHandler.UnfollowUser(w, r)
-                return
-            }
-        }
-        http.NotFound(w, r)
-    })
+	mux.HandleFunc("/api/v1/users/me", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			userHandler.GetMe(w, r)
+		case http.MethodPatch:
+			userHandler.UpdateMe(w, r)
+		default:
+			methodNotAllowed(w, r)
+		}
+	})
 
+	mux.HandleFunc("/api/v1/users/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
 
-    return middleware.RequestID(
-        middleware.Logging(serviceName)(
-            middleware.Recovery(mux),
-        ),
-    )
+		if strings.HasSuffix(path, "/follow") {
+			switch r.Method {
+			case http.MethodPost:
+				userHandler.FollowUser(w, r)
+			case http.MethodDelete:
+				userHandler.UnfollowUser(w, r)
+			default:
+				methodNotAllowed(w, r)
+			}
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			userHandler.GetByID(w, r)
+		default:
+			methodNotAllowed(w, r)
+		}
+	})
+
+	return middleware.RequestID(
+		middleware.Logging(serviceName)(
+			middleware.Recovery(serviceName)(mux),
+		),
+	)
+}
+
+func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	apiresponse.Error(
+		w,
+		http.StatusBadRequest,
+		middleware.GetRequestID(r.Context()),
+		apperrors.CodeBadRequest,
+		"method not supported for this route",
+		nil,
+	)
 }
