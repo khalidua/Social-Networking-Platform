@@ -1,13 +1,13 @@
 openapi: 3.0.0
 info:
   title: Social Networking Platform API
-  version: 1.0.0
+  version: 1.1.0
   description: |
-    API Gateway for a microservices-based social networking platform.
-    Includes Auth, Users, Posts, Feed, and Notifications services.
+    API Gateway contract for the Social Networking Platform.
+    Authentication is handled through Google OAuth2, JWTs, and Redis-backed sessions.
 
 servers:
-  - url: http://localhost:5000/api/v1
+  - url: http://localhost:8080
 
 tags:
   - name: Auth
@@ -24,6 +24,82 @@ components:
       bearerFormat: JWT
 
   schemas:
+    SuccessEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+        message:
+          type: string
+        request_id:
+          type: string
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              nullable: true
+        request_id:
+          type: string
+
+    AuthUser:
+      type: object
+      properties:
+        id:
+          type: string
+          example: google:1234567890
+        provider:
+          type: string
+          example: google
+        provider_subject:
+          type: string
+          example: 1234567890
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        profile_picture:
+          type: string
+          format: uri
+
+    AuthCallbackResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        session_id:
+          type: string
+        user:
+          $ref: '#/components/schemas/AuthUser'
+
+    SessionValidationResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        user:
+          $ref: '#/components/schemas/AuthUser'
+
     User:
       type: object
       properties:
@@ -61,46 +137,121 @@ components:
         read:
           type: boolean
 
-security:
-  - bearerAuth: []
-
 paths:
-
-  /auth/google:
+  /health:
     get:
       tags: [Auth]
-      summary: Redirect to Google OAuth
-      responses:
-        '302':
-          description: Redirect to Google login
-
-  /auth/callback:
-    get:
-      tags: [Auth]
-      summary: Handle Google OAuth callback
+      summary: Service health check
       responses:
         '200':
-          description: JWT token issued
+          description: Service is healthy
+
+  /api/v1/auth/login:
+    get:
+      tags: [Auth]
+      summary: Start Google OAuth2 login
+      description: Redirects the user to Google consent.
+      responses:
+        '302':
+          description: Redirect to Google OAuth2 consent screen
+        '500':
+          description: OAuth provider is not configured
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  token:
-                    type: string
+                $ref: '#/components/schemas/ErrorEnvelope'
 
-  /auth/logout:
-    post:
+  /api/v1/auth/callback:
+    get:
       tags: [Auth]
-      summary: Logout user
+      summary: Handle Google OAuth2 callback
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
       responses:
         '200':
-          description: Logged out successfully
+          description: Google login completed and JWT issued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AuthCallbackResponse'
+        '400':
+          description: Missing code or invalid OAuth state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '502':
+          description: Google token or userinfo exchange failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
-  /users/{id}:
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Invalidate the active session
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Session invalidated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessEnvelope'
+        '401':
+          description: Missing or invalid bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/auth/session:
+    get:
+      tags: [Auth]
+      summary: Validate the current session-backed JWT
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Session is valid
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SessionValidationResponse'
+        '401':
+          description: Session is missing, expired, or revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /api/v1/users/{id}:
     get:
       tags: [Users]
       summary: Get user profile
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -115,10 +266,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/User'
 
-  /users/{id}/follow:
+  /api/v1/users/{id}/follow:
     post:
       tags: [Users]
       summary: Follow a user
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -128,11 +281,11 @@ paths:
       responses:
         '200':
           description: Followed successfully
-
-  /users/{id}/unfollow:
-    post:
+    delete:
       tags: [Users]
       summary: Unfollow a user
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -143,42 +296,22 @@ paths:
         '200':
           description: Unfollowed successfully
 
-  /posts:
+  /api/v1/posts:
     post:
       tags: [Posts]
       summary: Create a post
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - content
-              properties:
-                content:
-                  type: string
+      security:
+        - bearerAuth: []
       responses:
         '201':
           description: Post created
 
-    get:
-      tags: [Posts]
-      summary: Get all posts
-      responses:
-        '200':
-          description: List of posts
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Post'
-
-  /posts/{id}:
+  /api/v1/posts/{id}:
     get:
       tags: [Posts]
       summary: Get a single post
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -192,31 +325,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Post'
-
-    put:
+    patch:
       tags: [Posts]
       summary: Update a post
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                content:
-                  type: string
       responses:
         '200':
           description: Post updated
-
     delete:
       tags: [Posts]
       summary: Delete a post
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -227,10 +354,12 @@ paths:
         '200':
           description: Post deleted
 
-  /feed:
+  /api/v1/feed:
     get:
       tags: [Feed]
       summary: Get personalized feed
+      security:
+        - bearerAuth: []
       responses:
         '200':
           description: User feed retrieved
@@ -241,10 +370,12 @@ paths:
                 items:
                   $ref: '#/components/schemas/Post'
 
-  /notifications:
+  /api/v1/notifications:
     get:
       tags: [Notifications]
       summary: Get user notifications
+      security:
+        - bearerAuth: []
       responses:
         '200':
           description: Notifications list
@@ -254,17 +385,3 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Notification'
-
-  /notifications/{id}/read:
-    patch:
-      tags: [Notifications]
-      summary: Mark notification as read
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Notification marked as read
