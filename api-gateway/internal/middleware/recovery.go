@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"social-networking-platform/api-gateway/internal/apperrors"
 	"social-networking-platform/api-gateway/internal/apiresponse"
+	"social-networking-platform/api-gateway/internal/apperrors"
 )
 
 func Recovery(serviceName string) func(http.Handler) http.Handler {

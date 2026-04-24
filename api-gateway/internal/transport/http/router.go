@@ -7,16 +7,15 @@ import (
 	"social-networking-platform/api-gateway/internal/middleware"
 )
 
-func NewRouter(serviceName string) http.Handler {
+func NewRouter(serviceName string, proxyHandler *handlers.ProxyHandler) http.Handler {
 	mux := http.NewServeMux()
 
 	healthHandler := handlers.NewHealthHandler(serviceName)
-	proxyHandler := handlers.NewProxyHandler()
 
 	mux.HandleFunc("/health", healthHandler.Health)
-
 	mux.HandleFunc("/api/v1/auth/", proxyHandler.ProxyAuth)
 	mux.HandleFunc("/api/v1/users/", proxyHandler.ProxyUsers)
+	mux.HandleFunc("/api/v1/posts", proxyHandler.ProxyPosts)
 	mux.HandleFunc("/api/v1/posts/", proxyHandler.ProxyPosts)
 	mux.HandleFunc("/api/v1/feed", proxyHandler.ProxyFeed)
 	mux.HandleFunc("/api/v1/notifications", proxyHandler.ProxyNotifications)

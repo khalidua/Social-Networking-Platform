@@ -1,21 +1,29 @@
 package bootstrap
 
 import (
-    "fmt"
-    "net/http"
+	"fmt"
+	"net/http"
 
-    "social-networking-platform/api-gateway/internal/config"
-    httptransport "social-networking-platform/api-gateway/internal/transport/http"
+	"social-networking-platform/api-gateway/internal/config"
+	handlers "social-networking-platform/api-gateway/internal/handler/http"
+	redisrepo "social-networking-platform/api-gateway/internal/repository/redis"
+	"social-networking-platform/api-gateway/internal/security"
+	httptransport "social-networking-platform/api-gateway/internal/transport/http"
 )
 
 type App struct {
-    Router http.Handler
+	Router http.Handler
 }
 
 func NewApp(cfg config.Config) (*App, error) {
-    router := httptransport.NewRouter(cfg.ServiceName)
-    if router == nil {
-        return nil, fmt.Errorf("failed to initialize router")
-    }
-    return &App{Router: router}, nil
+	tokenVerifier := security.NewTokenVerifier(cfg.JWTSecret, cfg.JWTIssuer)
+	redisClient := redisrepo.NewClient(cfg.RedisHost, cfg.RedisPort, cfg.RedisPassword, cfg.RedisDB, cfg.UpstreamTimeout)
+	sessionRepository := redisrepo.NewSessionRepository(redisClient)
+	proxyHandler := handlers.NewProxyHandler(cfg, tokenVerifier, sessionRepository)
+
+	router := httptransport.NewRouter(cfg.ServiceName, proxyHandler)
+	if router == nil {
+		return nil, fmt.Errorf("failed to initialize router")
+	}
+	return &App{Router: router}, nil
 }
