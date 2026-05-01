@@ -3,8 +3,8 @@ package handlers
 import (
 	"net/http"
 
-	"social-networking-platform/api-gateway/internal/middleware"
 	"social-networking-platform/api-gateway/internal/apiresponse"
+	"social-networking-platform/api-gateway/internal/middleware"
 )
 
 type HealthHandler struct {
