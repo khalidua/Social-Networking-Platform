@@ -26,13 +26,19 @@ type Config struct {
 	PostsServiceURL        string
 	FeedServiceURL         string
 	NotificationServiceURL string
+
 	RedisHost              string
 	RedisPort              string
 	RedisPassword          string
 	RedisDB                int
+
 	JWTSecret              string
 	JWTIssuer              string
+
 	UpstreamTimeout        time.Duration
+
+	RateLimitPerMinute int
+	RateLimitWindow    time.Duration
 }
 
 func Load() Config {
@@ -53,13 +59,19 @@ func Load() Config {
 	cfg.PostsServiceURL = getEnv("POSTS_SERVICE_URL", "http://localhost:8083")
 	cfg.FeedServiceURL = getEnv("FEED_SERVICE_URL", "http://localhost:8084")
 	cfg.NotificationServiceURL = getEnv("NOTIFICATION_SERVICE_URL", "http://localhost:8085")
+
 	cfg.RedisHost = getEnv("REDIS_HOST", "localhost")
 	cfg.RedisPort = getEnv("REDIS_PORT", "6379")
 	cfg.RedisPassword = getEnv("REDIS_PASSWORD", "")
 	cfg.RedisDB = getEnvInt("REDIS_DB", 0)
+
 	cfg.JWTSecret = getEnv("JWT_SECRET", "change-me")
 	cfg.JWTIssuer = getEnv("JWT_ISSUER", "auth-service")
+
 	cfg.UpstreamTimeout = getDuration("UPSTREAM_TIMEOUT", 10*time.Second)
+
+	cfg.RateLimitPerMinute = getEnvInt("RATE_LIMIT_PER_MINUTE", 100)
+	cfg.RateLimitWindow = getDuration("RATE_LIMIT_WINDOW", time.Minute)
 
 	validate(cfg)
 	return cfg
@@ -68,6 +80,13 @@ func Load() Config {
 func validate(cfg Config) {
 	if strings.TrimSpace(cfg.Port) == "" {
 		log.Fatal("PORT is required")
+	}
+	if cfg.RateLimitPerMinute <= 0 {
+		log.Fatal("RATE_LIMIT_PER_MINUTE must be greater than 0")
+	}
+
+	if cfg.RateLimitWindow <= 0 {
+		log.Fatal("RATE_LIMIT_WINDOW must be greater than 0")
 	}
 }
 

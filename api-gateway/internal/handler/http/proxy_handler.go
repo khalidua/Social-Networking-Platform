@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,25 +26,34 @@ type ProxyHandler struct {
 	postsServiceURL        string
 	feedServiceURL         string
 	notificationServiceURL string
-	tokenVerifier          *security.TokenVerifier
-	sessions               sessionReader
+
 	upstreamTimeout time.Duration
+
+	tokenVerifier *security.TokenVerifier
+	sessions 	  sessionReader
+	rateLimiter   rateLimiter
+	
 }
 
 type sessionReader interface {
 	GetByID(ctx context.Context, sessionID string) (*domain.Session, error)
 }
 
-func NewProxyHandler(cfg config.Config, tokenVerifier *security.TokenVerifier, sessions sessionReader) *ProxyHandler {
+type rateLimiter interface {
+	Allow(userID string) middleware.RateLimitResult
+}
+
+func NewProxyHandler(cfg config.Config, tokenVerifier *security.TokenVerifier, sessions sessionReader, rateLimiter rateLimiter) *ProxyHandler {
 	return &ProxyHandler{
 		authServiceURL:         cfg.AuthServiceURL,
 		usersServiceURL:        cfg.UsersServiceURL,
 		postsServiceURL:        cfg.PostsServiceURL,
 		feedServiceURL:         cfg.FeedServiceURL,
 		notificationServiceURL: cfg.NotificationServiceURL,
+		upstreamTimeout: 		cfg.UpstreamTimeout,
 		tokenVerifier:          tokenVerifier,
 		sessions:               sessions,
-		upstreamTimeout: cfg.UpstreamTimeout,
+		rateLimiter:            rateLimiter,
 	}
 }
 
@@ -52,6 +64,9 @@ func (h *ProxyHandler) ProxyAuth(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) ProxyUsers(w http.ResponseWriter, r *http.Request) {
 	claims, ok := h.requireAuthenticated(w, r)
 	if !ok {
+		return
+	}
+	if !h.allowUserRequest(w, r, claims) {
 		return
 	}
 	h.proxyRequest(w, r, h.usersServiceURL, claims)
@@ -67,12 +82,18 @@ func (h *ProxyHandler) ProxyPosts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.allowUserRequest(w, r, claims) {
+		return
+	}
 	h.proxyRequest(w, r, h.postsServiceURL, claims)
 }
 
 func (h *ProxyHandler) ProxyFeed(w http.ResponseWriter, r *http.Request) {
 	claims, ok := h.requireAuthenticated(w, r)
 	if !ok {
+		return
+	}
+	if !h.allowUserRequest(w, r, claims) {
 		return
 	}
 	h.proxyRequest(w, r, h.feedServiceURL, claims)
@@ -83,15 +104,20 @@ func (h *ProxyHandler) ProxyNotifications(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	if !h.allowUserRequest(w, r, claims) {
+		return
+	}
 	h.proxyRequest(w, r, h.notificationServiceURL, claims)
 }
 
 func (h *ProxyHandler) requireAuthenticated(w http.ResponseWriter, r *http.Request) (*security.TokenClaims, bool) {
 	requestID := middleware.GetRequestID(r.Context())
+
 	token := strings.TrimSpace(r.Header.Get("Authorization"))
 	if strings.HasPrefix(strings.ToLower(token), "bearer ") {
 		token = strings.TrimSpace(token[7:])
 	}
+
 	if token == "" {
 		apiresponse.Error(
 			w,
@@ -154,8 +180,74 @@ func (h *ProxyHandler) requireAuthenticated(w http.ResponseWriter, r *http.Reque
 	return claims, true
 }
 
+func (h *ProxyHandler) allowUserRequest(w http.ResponseWriter, r *http.Request, claims *security.TokenClaims) bool {
+	requestID := middleware.GetRequestID(r.Context())
+
+	if h.rateLimiter == nil {
+		return true
+	}
+
+	result := h.rateLimiter.Allow(claims.Subject)
+
+	w.Header().Set("X-RateLimit-Limit", strconv.Itoa(result.Limit))
+	w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(result.Remaining))
+	w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(result.ResetAt.UTC().Unix(), 10))
+
+	if result.Allowed {
+		return true
+	}
+
+	retryAfterSeconds := int(result.RetryAfter.Seconds())
+	if retryAfterSeconds < 1 {
+		retryAfterSeconds = 1
+	}
+
+	w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+
+	logRateLimitExceeded(
+		r,
+		claims.Subject,
+		requestID,
+		result.Limit,
+		result.ResetAt,
+	)
+
+	apiresponse.Error(
+		w,
+		http.StatusTooManyRequests,
+		requestID,
+		apperrors.CodeRateLimited,
+		"rate limit exceeded",
+		map[string]interface{}{
+			"limit":               result.Limit,
+			"window_seconds":      int(time.Minute.Seconds()),
+			"retry_after_seconds": retryAfterSeconds,
+		},
+	)
+
+	return false
+}
+
+func logRateLimitExceeded(r *http.Request, userID string, requestID string, limit int, resetAt time.Time) {
+	entry := map[string]interface{}{
+		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+		"level":      "WARN",
+		"event":      "rate_limit_exceeded",
+		"service":    "api-gateway",
+		"request_id": requestID,
+		"user_id":    userID,
+		"method":     r.Method,
+		"path":       r.URL.Path,
+		"limit":      limit,
+		"reset_at":   resetAt.UTC().Format(time.RFC3339),
+	}
+
+	_ = json.NewEncoder(os.Stdout).Encode(entry)
+}
+
 func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targetURL string, claims *security.TokenClaims) {
 	requestID := middleware.GetRequestID(r.Context())
+
 	target, err := url.Parse(targetURL)
 	if err != nil {
 		apiresponse.Error(
@@ -181,17 +273,21 @@ func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targ
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
+
 		req.URL.Path = r.URL.Path
 		req.URL.RawPath = r.URL.RawPath
 		req.URL.RawQuery = r.URL.RawQuery
 		req.Host = target.Host
+
 		req.Header.Set(middleware.RequestIDHeader, requestID)
+
 		if claims != nil {
 			req.Header.Set("X-User-ID", claims.Subject)
 			req.Header.Set("X-User-Email", claims.Email)
 			req.Header.Set("X-Session-ID", claims.SessionID)
 		}
 	}
+	
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
 		apiresponse.Error(
 			rw,
