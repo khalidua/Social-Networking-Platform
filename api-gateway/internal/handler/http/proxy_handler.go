@@ -57,6 +57,11 @@ func (h *ProxyHandler) ProxyUsers(w http.ResponseWriter, r *http.Request) {
 	h.proxyRequest(w, r, h.usersServiceURL, claims)
 }
 
+// For testing the API Gateway's handling of slow responses from the users-service, we allow unauthenticated access to the users-service proxy endpoint. In production, you would typically require authentication for this as well.
+// func (h *ProxyHandler) ProxyUsers(w http.ResponseWriter, r *http.Request) {
+// 	h.proxyRequest(w, r, h.usersServiceURL, nil)
+// }
+
 func (h *ProxyHandler) ProxyPosts(w http.ResponseWriter, r *http.Request) {
 	claims, ok := h.requireAuthenticated(w, r)
 	if !ok {
