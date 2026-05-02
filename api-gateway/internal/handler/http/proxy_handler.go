@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -24,6 +25,7 @@ type ProxyHandler struct {
 	notificationServiceURL string
 	tokenVerifier          *security.TokenVerifier
 	sessions               sessionReader
+	upstreamTimeout time.Duration
 }
 
 type sessionReader interface {
@@ -39,6 +41,7 @@ func NewProxyHandler(cfg config.Config, tokenVerifier *security.TokenVerifier, s
 		notificationServiceURL: cfg.NotificationServiceURL,
 		tokenVerifier:          tokenVerifier,
 		sessions:               sessions,
+		upstreamTimeout: cfg.UpstreamTimeout,
 	}
 }
 
@@ -162,6 +165,14 @@ func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targ
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
+
+	proxy.Transport = &http.Transport{
+	DialContext: (&net.Dialer{
+		Timeout: h.upstreamTimeout,
+	}).DialContext,
+	ResponseHeaderTimeout: h.upstreamTimeout,
+	}
+
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)

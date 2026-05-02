@@ -41,3 +41,4 @@ Or build it:
 
 ```bash
 go build ./cmd/server
+```
