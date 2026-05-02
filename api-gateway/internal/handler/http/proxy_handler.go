@@ -58,7 +58,7 @@ func NewProxyHandler(cfg config.Config, tokenVerifier *security.TokenVerifier, s
 }
 
 func (h *ProxyHandler) ProxyAuth(w http.ResponseWriter, r *http.Request) {
-	h.proxyRequest(w, r, h.authServiceURL, nil)
+	h.proxyRequest(w, r, h.authServiceURL, "auth-service", nil)
 }
 
 func (h *ProxyHandler) ProxyUsers(w http.ResponseWriter, r *http.Request) {
@@ -69,12 +69,12 @@ func (h *ProxyHandler) ProxyUsers(w http.ResponseWriter, r *http.Request) {
 	if !h.allowUserRequest(w, r, claims) {
 		return
 	}
-	h.proxyRequest(w, r, h.usersServiceURL, claims)
+	h.proxyRequest(w, r, h.usersServiceURL, "users-service", claims)
 }
 
 // For testing the API Gateway's handling of slow responses from the users-service, we allow unauthenticated access to the users-service proxy endpoint. In production, you would typically require authentication for this as well.
 // func (h *ProxyHandler) ProxyUsers(w http.ResponseWriter, r *http.Request) {
-// 	h.proxyRequest(w, r, h.usersServiceURL, nil)
+// 	h.proxyRequest(w, r, h.usersServiceURL, "users-service", nil)
 // }
 
 func (h *ProxyHandler) ProxyPosts(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +85,7 @@ func (h *ProxyHandler) ProxyPosts(w http.ResponseWriter, r *http.Request) {
 	if !h.allowUserRequest(w, r, claims) {
 		return
 	}
-	h.proxyRequest(w, r, h.postsServiceURL, claims)
+	h.proxyRequest(w, r, h.postsServiceURL, "posts-service", claims)
 }
 
 func (h *ProxyHandler) ProxyFeed(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +96,7 @@ func (h *ProxyHandler) ProxyFeed(w http.ResponseWriter, r *http.Request) {
 	if !h.allowUserRequest(w, r, claims) {
 		return
 	}
-	h.proxyRequest(w, r, h.feedServiceURL, claims)
+	h.proxyRequest(w, r, h.feedServiceURL, "feed-service", claims)
 }
 
 func (h *ProxyHandler) ProxyNotifications(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +107,7 @@ func (h *ProxyHandler) ProxyNotifications(w http.ResponseWriter, r *http.Request
 	if !h.allowUserRequest(w, r, claims) {
 		return
 	}
-	h.proxyRequest(w, r, h.notificationServiceURL, claims)
+	h.proxyRequest(w, r, h.notificationServiceURL, "notifications-service", claims)
 }
 
 func (h *ProxyHandler) requireAuthenticated(w http.ResponseWriter, r *http.Request) (*security.TokenClaims, bool) {
@@ -235,6 +235,7 @@ func logRateLimitExceeded(r *http.Request, userID string, requestID string, limi
 		"event":      "rate_limit_exceeded",
 		"service":    "api-gateway",
 		"request_id": requestID,
+		"correlation_id": middleware.GetCorrelationID(r.Context()),
 		"user_id":    userID,
 		"method":     r.Method,
 		"path":       r.URL.Path,
@@ -245,8 +246,10 @@ func logRateLimitExceeded(r *http.Request, userID string, requestID string, limi
 	_ = json.NewEncoder(os.Stdout).Encode(entry)
 }
 
-func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targetURL string, claims *security.TokenClaims) {
+func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targetURL string, upstreamService string, claims *security.TokenClaims) {
 	requestID := middleware.GetRequestID(r.Context())
+	correlationID := middleware.GetCorrelationID(r.Context())
+
 
 	target, err := url.Parse(targetURL)
 	if err != nil {
@@ -261,13 +264,15 @@ func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targ
 		return
 	}
 
+	r.Header.Set("X-Upstream-Service", upstreamService)
+
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
 	proxy.Transport = &http.Transport{
-	DialContext: (&net.Dialer{
-		Timeout: h.upstreamTimeout,
-	}).DialContext,
-	ResponseHeaderTimeout: h.upstreamTimeout,
+		DialContext: (&net.Dialer{
+			Timeout: h.upstreamTimeout,
+		}).DialContext,
+		ResponseHeaderTimeout: h.upstreamTimeout,
 	}
 
 	originalDirector := proxy.Director
@@ -280,6 +285,9 @@ func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targ
 		req.Host = target.Host
 
 		req.Header.Set(middleware.RequestIDHeader, requestID)
+		req.Header.Set(middleware.CorrelationIDHeader, correlationID)
+		req.Header.Set("X-Gateway-Service", "api-gateway")
+		req.Header.Set("X-Upstream-Service", upstreamService)
 
 		if claims != nil {
 			req.Header.Set("X-User-ID", claims.Subject)
@@ -287,8 +295,21 @@ func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targ
 			req.Header.Set("X-Session-ID", claims.SessionID)
 		}
 	}
+
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		resp.Header.Set(middleware.RequestIDHeader, requestID)
+		resp.Header.Set(middleware.CorrelationIDHeader, correlationID)
+		resp.Header.Set("X-Upstream-Service", upstreamService)
+		return nil
+	}
 	
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
+		logUpstreamError(r, upstreamService, targetURL, proxyErr)
+
+		rw.Header().Set(middleware.RequestIDHeader, requestID)
+		rw.Header().Set(middleware.CorrelationIDHeader, correlationID)
+		rw.Header().Set("X-Upstream-Service", upstreamService)
+
 		apiresponse.Error(
 			rw,
 			http.StatusBadGateway,
@@ -300,4 +321,22 @@ func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targ
 	}
 
 	proxy.ServeHTTP(w, r)
+}
+
+func logUpstreamError(r *http.Request, upstreamService string, targetURL string, err error) {
+	entry := map[string]interface{}{
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+		"level":            "ERROR",
+		"event":            "upstream_error",
+		"service":          "api-gateway",
+		"request_id":       middleware.GetRequestID(r.Context()),
+		"correlation_id":   middleware.GetCorrelationID(r.Context()),
+		"method":           r.Method,
+		"path":             r.URL.Path,
+		"upstream_service": upstreamService,
+		"upstream_url":     targetURL,
+		"error":            err.Error(),
+	}
+
+	_ = json.NewEncoder(os.Stdout).Encode(entry)
 }
