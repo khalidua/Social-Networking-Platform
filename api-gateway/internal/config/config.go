@@ -39,6 +39,13 @@ type Config struct {
 
 	RateLimitPerMinute int
 	RateLimitWindow    time.Duration
+
+	TLSEnabled bool
+	TLSCertFile string
+	TLSKeyFile  string
+
+	TrustProxyHeaders bool
+	RequireHTTPS      bool
 }
 
 func Load() Config {
@@ -73,6 +80,12 @@ func Load() Config {
 	cfg.RateLimitPerMinute = getEnvInt("RATE_LIMIT_PER_MINUTE", 100)
 	cfg.RateLimitWindow = getDuration("RATE_LIMIT_WINDOW", time.Minute)
 
+	cfg.TLSEnabled = getEnvBool("TLS_ENABLED", false)
+	cfg.TLSCertFile = getEnv("TLS_CERT_FILE", "")
+	cfg.TLSKeyFile = getEnv("TLS_KEY_FILE", "")
+
+	cfg.TrustProxyHeaders = getEnvBool("TRUST_PROXY_HEADERS", false)
+	cfg.RequireHTTPS = getEnvBool("REQUIRE_HTTPS", false)
 	validate(cfg)
 	return cfg
 }
@@ -87,6 +100,19 @@ func validate(cfg Config) {
 
 	if cfg.RateLimitWindow <= 0 {
 		log.Fatal("RATE_LIMIT_WINDOW must be greater than 0")
+	}
+
+	if cfg.TLSEnabled {
+		if strings.TrimSpace(cfg.TLSCertFile) == "" {
+			log.Fatal("TLS_CERT_FILE is required when TLS_ENABLED=true")
+		}
+		if strings.TrimSpace(cfg.TLSKeyFile) == "" {
+			log.Fatal("TLS_KEY_FILE is required when TLS_ENABLED=true")
+		}
+	}
+
+	if cfg.RequireHTTPS && !cfg.TLSEnabled && !cfg.TrustProxyHeaders {
+		log.Fatal("REQUIRE_HTTPS=true requires either TLS_ENABLED=true or TRUST_PROXY_HEADERS=true")
 	}
 }
 
@@ -122,4 +148,16 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	raw := strings.ToLower(strings.TrimSpace(getEnv(key, strconv.FormatBool(fallback))))
+	switch raw {
+	case "true", "1", "yes", "y", "on":
+		return true
+	case "false", "0", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }

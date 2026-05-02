@@ -19,7 +19,13 @@ type App struct {
 func NewApp(cfg config.Config) (*App, error) {
 	tokenVerifier := security.NewTokenVerifier(cfg.JWTSecret, cfg.JWTIssuer)
 
-	redisClient := redisrepo.NewClient(cfg.RedisHost, cfg.RedisPort, cfg.RedisPassword, cfg.RedisDB, cfg.UpstreamTimeout)
+	redisClient := redisrepo.NewClient(
+		cfg.RedisHost, 
+		cfg.RedisPort, 
+		cfg.RedisPassword, 
+		cfg.RedisDB, 
+		cfg.UpstreamTimeout,
+	)
 
 	sessionRepository := redisrepo.NewSessionRepository(redisClient)
 
@@ -28,9 +34,14 @@ func NewApp(cfg config.Config) (*App, error) {
 		cfg.RateLimitWindow,
 	)
 
-	proxyHandler := handlers.NewProxyHandler(cfg, tokenVerifier, sessionRepository, rateLimiter)
+	proxyHandler := handlers.NewProxyHandler(
+		cfg,
+		tokenVerifier, 
+		sessionRepository, 
+		rateLimiter,
+	)
 
-	router := httptransport.NewRouter(cfg.ServiceName, proxyHandler)
+	router := httptransport.NewRouter(cfg, proxyHandler)
 	if router == nil {
 		return nil, fmt.Errorf("failed to initialize router")
 	}

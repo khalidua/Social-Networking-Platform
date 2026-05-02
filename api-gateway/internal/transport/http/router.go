@@ -3,14 +3,15 @@ package httptransport
 import (
 	"net/http"
 
+	"social-networking-platform/api-gateway/internal/config"
 	handlers "social-networking-platform/api-gateway/internal/handler/http"
 	"social-networking-platform/api-gateway/internal/middleware"
 )
 
-func NewRouter(serviceName string, proxyHandler *handlers.ProxyHandler) http.Handler {
+func NewRouter(cfg config.Config, proxyHandler *handlers.ProxyHandler) http.Handler {
 	mux := http.NewServeMux()
 
-	healthHandler := handlers.NewHealthHandler(serviceName)
+	healthHandler := handlers.NewHealthHandler(cfg.ServiceName)
 
 	mux.HandleFunc("/health", healthHandler.Health)
 	mux.HandleFunc("/api/v1/auth/", proxyHandler.ProxyAuth)
@@ -21,8 +22,12 @@ func NewRouter(serviceName string, proxyHandler *handlers.ProxyHandler) http.Han
 	mux.HandleFunc("/api/v1/notifications", proxyHandler.ProxyNotifications)
 
 	return middleware.RequestID(
-		middleware.Logging(serviceName)(
-			middleware.Recovery(serviceName)(mux),
+		middleware.ProxyHeaders(cfg.TrustProxyHeaders)(
+			middleware.RequireHTTPS(cfg.RequireHTTPS, cfg.TrustProxyHeaders)(
+				middleware.Logging(cfg.ServiceName)(
+					middleware.Recovery(cfg.ServiceName)(mux),
+				),
+			),
 		),
 	)
 }

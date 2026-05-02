@@ -30,6 +30,14 @@ func main() {
 	}
 
 	go func() {
+		if cfg.TLSEnabled {
+			log.Printf("starting %s with TLS on port %s", cfg.ServiceName, cfg.Port)
+			if err := server.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("tls server failed: %v", err)
+			}
+			return
+		}
+		
 		log.Printf("starting %s on port %s", cfg.ServiceName, cfg.Port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server failed: %v", err)
