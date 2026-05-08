@@ -109,7 +109,21 @@ components:
           type: string
         bio:
           type: string
+        profile_picture:
+          type: string
         profilePicture:
+          type: string
+          description: Deprecated alias; responses use snake_case JSON (profile_picture).
+
+    UpdateProfileRequest:
+      type: object
+      description: Partial profile update; omit fields you do not want to change.
+      properties:
+        name:
+          type: string
+        bio:
+          type: string
+        profile_picture:
           type: string
 
     Post:
@@ -246,6 +260,67 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
+  /api/v1/users/me:
+    get:
+      tags: [Users]
+      summary: Get the authenticated user's profile
+      description: The API gateway forwards `X-User-ID` derived from the session/JWT; clients should not send raw user identifiers in the path for this endpoint.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '401':
+          description: Missing or invalid authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+    patch:
+      tags: [Users]
+      summary: Update the authenticated user's profile (partial)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '400':
+          description: Validation error or invalid JSON body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing or invalid authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
   /api/v1/users/{id}:
     get:
       tags: [Users]
@@ -264,7 +339,18 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /api/v1/users/{id}/follow:
     post:
@@ -279,8 +365,26 @@ paths:
           schema:
             type: string
       responses:
-        '200':
-          description: Followed successfully
+        '204':
+          description: Follow accepted (idempotent; no response body)
+        '400':
+          description: Bad request (e.g. invalid user id)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Forbidden (e.g. cannot follow self)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
     delete:
       tags: [Users]
       summary: Unfollow a user
@@ -293,8 +397,26 @@ paths:
           schema:
             type: string
       responses:
-        '200':
-          description: Unfollowed successfully
+        '204':
+          description: Unfollow accepted (no response body)
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Forbidden (e.g. cannot unfollow self)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /api/v1/posts:
     post:

@@ -1,6 +1,6 @@
 package domain
 
 type Follow struct {
-    FollowerID string
-    FolloweeID string
+	FollowerID string
+	FolloweeID string
 }

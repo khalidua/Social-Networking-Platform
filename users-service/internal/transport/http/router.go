@@ -4,17 +4,16 @@ import (
 	"net/http"
 	"strings"
 
+	"social-networking-platform/users-service/internal/apiresponse"
+	"social-networking-platform/users-service/internal/apperrors"
 	handlers "social-networking-platform/users-service/internal/handler/http"
 	"social-networking-platform/users-service/internal/middleware"
-	"social-networking-platform/users-service/internal/apperrors"
-	"social-networking-platform/users-service/internal/apiresponse"
 )
 
-func NewRouter(serviceName string) http.Handler {
+func NewRouter(serviceName string, userHandler *handlers.UserHandler) http.Handler {
 	mux := http.NewServeMux()
 
 	healthHandler := handlers.NewHealthHandler(serviceName)
-	userHandler := handlers.NewUserHandler()
 
 	mux.HandleFunc("/health", healthHandler.Health)
 
