@@ -1,21 +1,56 @@
 package bootstrap
 
 import (
-    "fmt"
-    "net/http"
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"sync"
 
-    "social-networking-platform/notification-service/internal/config"
-    httptransport "social-networking-platform/notification-service/internal/transport/http"
+	"social-networking-platform/notification-service/internal/config"
+	kafkarepo "social-networking-platform/notification-service/internal/repository/kafka"
+	httptransport "social-networking-platform/notification-service/internal/transport/http"
 )
 
 type App struct {
-    Router http.Handler
+	Router   http.Handler
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
+	follower kafkarepo.FollowConsumer
 }
 
 func NewApp(cfg config.Config) (*App, error) {
-    router := httptransport.NewRouter(cfg.ServiceName)
-    if router == nil {
-        return nil, fmt.Errorf("failed to initialize router")
-    }
-    return &App{Router: router}, nil
+	router := httptransport.NewRouter(cfg.ServiceName)
+	if router == nil {
+		return nil, fmt.Errorf("failed to initialize router")
+	}
+	cons, err := kafkarepo.NewFollowConsumer(cfg)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	app := &App{
+		Router:   router,
+		cancel:   cancel,
+		follower: cons,
+	}
+	app.wg.Add(1)
+	go func() {
+		defer app.wg.Done()
+		if err := cons.Run(ctx); err != nil {
+			log.Printf("notification-service: user.followed consumer exited: %v", err)
+		}
+	}()
+	return app, nil
+}
+
+func (a *App) Close() error {
+	if a.cancel != nil {
+		a.cancel()
+	}
+	a.wg.Wait()
+	if a.follower != nil {
+		return a.follower.Close()
+	}
+	return nil
 }

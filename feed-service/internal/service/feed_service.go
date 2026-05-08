@@ -1,13 +1,13 @@
 package service
 
 type FeedService interface {
-    GetFeed() error
+	GetFeed() error
 }
 
 type StubFeedService struct{}
 
 func NewStubFeedService() *StubFeedService {
-    return &StubFeedService{}
+	return &StubFeedService{}
 }
 
 func (s *StubFeedService) GetFeed() error { return nil }

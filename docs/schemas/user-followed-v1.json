@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/user-followed-v1.json",
+  "title": "user.followed v1",
+  "description": "Emitted by users-service to KAFKA_TOPIC_USER_FOLLOWED (default user.followed) after a new follow edge is persisted.",
+  "type": "object",
+  "required": ["follower_id", "followee_id"],
+  "additionalProperties": false,
+  "properties": {
+    "follower_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Auth subject of the follower (matches X-User-ID / users.id TEXT)"
+    },
+    "followee_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Auth subject of the user being followed"
+    }
+  }
+}

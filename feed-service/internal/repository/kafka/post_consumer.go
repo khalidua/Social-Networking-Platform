@@ -1,13 +1,13 @@
 package kafka
 
 type PostConsumer interface {
-    Start() error
+	Start() error
 }
 
 type StubPostConsumer struct{}
 
 func NewStubPostConsumer() *StubPostConsumer {
-    return &StubPostConsumer{}
+	return &StubPostConsumer{}
 }
 
 func (c *StubPostConsumer) Start() error { return nil }
