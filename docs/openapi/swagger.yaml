@@ -12,6 +12,8 @@ servers:
 tags:
   - name: Auth
   - name: Users
+    description: |
+      Profile read/update (`/users/me`) and follow actions require the API gateway (or callers) to send `X-User-ID` identifying the authenticated user—set by the gateway when proxying. JSON responses nest profile objects under `data` in `SuccessEnvelope`. User objects use snake_case (`profile_picture`) in JSON bodies.
   - name: Posts
   - name: Feed
   - name: Notifications
@@ -111,9 +113,6 @@ components:
           type: string
         profile_picture:
           type: string
-        profilePicture:
-          type: string
-          description: Deprecated alias; responses use snake_case JSON (profile_picture).
 
     UpdateProfileRequest:
       type: object
@@ -264,9 +263,16 @@ paths:
     get:
       tags: [Users]
       summary: Get the authenticated user's profile
-      description: The API gateway forwards `X-User-ID` derived from the session/JWT; clients should not send raw user identifiers in the path for this endpoint.
+      description: Requires `X-User-ID` on the upstream users-service request (injected by the API gateway).
       security:
         - bearerAuth: []
+      parameters:
+        - name: X-User-ID
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Auth subject forwarded by gateway (not usually set manually by SPA clients hitting the gateway).
       responses:
         '200':
           description: Current user profile
@@ -285,11 +291,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Persistence or internal failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
     patch:
       tags: [Users]
       summary: Update the authenticated user's profile (partial)
       security:
         - bearerAuth: []
+      parameters:
+        - name: X-User-ID
+          in: header
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -320,6 +338,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Persistence or internal failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /api/v1/users/{id}:
     get:
@@ -345,8 +369,20 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/User'
+        '400':
+          description: Invalid path segment (reserved `me`, empty id, malformed path)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal error
           content:
             application/json:
               schema:
@@ -359,6 +395,12 @@ paths:
       security:
         - bearerAuth: []
       parameters:
+        - name: X-User-ID
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Follower identity (gateway-injected upstream).
         - name: id
           in: path
           required: true
@@ -385,12 +427,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
     delete:
       tags: [Users]
       summary: Unfollow a user
       security:
         - bearerAuth: []
       parameters:
+        - name: X-User-ID
+          in: header
+          required: true
+          schema:
+            type: string
         - name: id
           in: path
           required: true
@@ -413,6 +466,12 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '403':
           description: Forbidden (e.g. cannot unfollow self)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal error
           content:
             application/json:
               schema:
