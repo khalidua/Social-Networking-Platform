@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 
 	"social-networking-platform/posts-service/internal/config"
+	handlers "social-networking-platform/posts-service/internal/handler/http"
+	"social-networking-platform/posts-service/internal/repository/postgres"
+	"social-networking-platform/posts-service/internal/service"
 	httptransport "social-networking-platform/posts-service/internal/transport/http"
 )
 
@@ -48,7 +51,11 @@ func NewApp(cfg config.Config) (*App, error) {
 		return nil, err
 	}
 
-	router := httptransport.NewRouter(cfg.ServiceName)
+	postRepo := postgres.NewSQLPostRepository(db)
+	postSvc := service.NewPostService(postRepo)
+	postHandler := handlers.NewPostHandler(postSvc)
+
+	router := httptransport.NewRouter(cfg.ServiceName, postHandler)
 	if router == nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to initialize router")
