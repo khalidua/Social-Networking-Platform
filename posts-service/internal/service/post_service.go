@@ -6,7 +6,9 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"social-networking-platform/posts-service/internal/domain"
 	"social-networking-platform/posts-service/internal/repository/postgres"
@@ -15,7 +17,10 @@ import (
 var (
 	ErrForbidden    = errors.New("forbidden")
 	ErrPostNotFound = errors.New("post not found")
+	ErrValidation   = errors.New("validation error")
 )
+
+const maxContentRunes = 2000
 
 type PostService interface {
 	CreatePost(ctx context.Context, authorID string, content string) (*domain.Post, error)
@@ -38,10 +43,16 @@ func NewPostService(repo postgres.PostRepository) PostService {
 }
 
 func (s *postService) CreatePost(ctx context.Context, authorID string, content string) (*domain.Post, error) {
+	trimmedAuthorID := strings.TrimSpace(authorID)
+	trimmedContent := strings.TrimSpace(content)
+	if err := validatePostContent(trimmedContent); err != nil {
+		return nil, err
+	}
+
 	post := &domain.Post{
 		ID:       s.newID(),
-		AuthorID: strings.TrimSpace(authorID),
-		Content:  strings.TrimSpace(content),
+		AuthorID: trimmedAuthorID,
+		Content:  trimmedContent,
 	}
 
 	if err := s.repo.CreatePost(ctx, post); err != nil {
@@ -60,6 +71,12 @@ func (s *postService) ListPostsByAuthor(ctx context.Context, authorID string) ([
 }
 
 func (s *postService) UpdatePost(ctx context.Context, requesterID string, postID string, content string) (*domain.Post, error) {
+	trimmedRequesterID := strings.TrimSpace(requesterID)
+	trimmedContent := strings.TrimSpace(content)
+	if err := validatePostContent(trimmedContent); err != nil {
+		return nil, err
+	}
+
 	post, err := s.repo.GetPostByID(ctx, strings.TrimSpace(postID))
 	if err != nil {
 		return nil, err
@@ -67,11 +84,11 @@ func (s *postService) UpdatePost(ctx context.Context, requesterID string, postID
 	if post == nil {
 		return nil, ErrPostNotFound
 	}
-	if post.AuthorID != strings.TrimSpace(requesterID) {
+	if post.AuthorID != trimmedRequesterID {
 		return nil, ErrForbidden
 	}
 
-	post.Content = strings.TrimSpace(content)
+	post.Content = trimmedContent
 	if err := s.repo.UpdatePost(ctx, post); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrPostNotFound
@@ -110,6 +127,20 @@ func newPostID() string {
 		panic("posts-service: unable to generate post id")
 	}
 	return hex.EncodeToString(buf[:])
+}
+
+func validatePostContent(content string) error {
+	if content == "" {
+		return validation("content is required")
+	}
+	if utf8.RuneCountInString(content) > maxContentRunes {
+		return validation(fmt.Sprintf("content must be at most %d characters", maxContentRunes))
+	}
+	return nil
+}
+
+func validation(msg string) error {
+	return fmt.Errorf("%s: %w", msg, ErrValidation)
 }
 
 type StubPostService struct{}

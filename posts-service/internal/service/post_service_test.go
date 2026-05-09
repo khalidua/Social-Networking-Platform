@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,6 +105,50 @@ func TestCreatePost_PersistsGeneratedPost(t *testing.T) {
 	}
 }
 
+func TestCreatePost_ValidationErrorWhenContentBlank(t *testing.T) {
+	ctx := context.Background()
+	repo := &mockPostRepository{}
+	svc := &postService{
+		repo: repo,
+		newID: func() string {
+			return "post-1"
+		},
+	}
+
+	post, err := svc.CreatePost(ctx, "author-1", "   ")
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("CreatePost error = %v, want %v", err, ErrValidation)
+	}
+	if post != nil {
+		t.Fatalf("expected nil post, got %+v", post)
+	}
+	if repo.lastCreated != nil {
+		t.Fatalf("expected repository not to be called, got %+v", repo.lastCreated)
+	}
+}
+
+func TestCreatePost_ValidationErrorWhenContentTooLong(t *testing.T) {
+	ctx := context.Background()
+	repo := &mockPostRepository{}
+	svc := &postService{
+		repo: repo,
+		newID: func() string {
+			return "post-1"
+		},
+	}
+
+	post, err := svc.CreatePost(ctx, "author-1", strings.Repeat("a", maxContentRunes+1))
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("CreatePost error = %v, want %v", err, ErrValidation)
+	}
+	if post != nil {
+		t.Fatalf("expected nil post, got %+v", post)
+	}
+	if repo.lastCreated != nil {
+		t.Fatalf("expected repository not to be called, got %+v", repo.lastCreated)
+	}
+}
+
 func TestGetPost_DelegatesToRepository(t *testing.T) {
 	ctx := context.Background()
 	want := &domain.Post{ID: "post-1", AuthorID: "author-1", Content: "hello"}
@@ -200,6 +245,23 @@ func TestUpdatePost_RejectsNonOwner(t *testing.T) {
 	}
 	if repo.updateCallCount != 0 {
 		t.Fatalf("updateCallCount = %d, want 0", repo.updateCallCount)
+	}
+}
+
+func TestUpdatePost_ValidationErrorWhenContentBlank(t *testing.T) {
+	ctx := context.Background()
+	repo := &mockPostRepository{}
+	svc := NewPostService(repo)
+
+	post, err := svc.UpdatePost(ctx, "author-1", "post-1", "   ")
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("UpdatePost error = %v, want %v", err, ErrValidation)
+	}
+	if post != nil {
+		t.Fatalf("expected nil post, got %+v", post)
+	}
+	if repo.lastFetchedID != "" {
+		t.Fatalf("expected repository not to be queried, got %q", repo.lastFetchedID)
 	}
 }
 

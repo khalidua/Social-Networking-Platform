@@ -1,9 +1,10 @@
 package httptransport
 
 import (
-	"encoding/json"
 	"net/http"
 
+	"social-networking-platform/posts-service/internal/apiresponse"
+	"social-networking-platform/posts-service/internal/apperrors"
 	handlers "social-networking-platform/posts-service/internal/handler/http"
 	"social-networking-platform/posts-service/internal/middleware"
 )
@@ -48,14 +49,5 @@ func NewRouter(serviceName string, postHandler *handlers.PostHandler) http.Handl
 }
 
 func methodNotAllowed(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusBadRequest)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"success": false,
-		"error": map[string]any{
-			"code":    "BAD_REQUEST",
-			"message": "method not supported for this route",
-		},
-		"request_id": middleware.GetRequestID(r.Context()),
-	})
+	apiresponse.Error(w, http.StatusBadRequest, apperrors.CodeBadRequest, "method not supported for this route")
 }

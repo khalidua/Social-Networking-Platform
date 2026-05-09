@@ -7,17 +7,11 @@ import (
 	"net/http"
 	"strings"
 
+	"social-networking-platform/posts-service/internal/apiresponse"
+	"social-networking-platform/posts-service/internal/apperrors"
 	"social-networking-platform/posts-service/internal/domain"
 	"social-networking-platform/posts-service/internal/middleware"
 	"social-networking-platform/posts-service/internal/service"
-)
-
-const (
-	codeBadRequest      = "BAD_REQUEST"
-	codeUnauthenticated = "UNAUTHENTICATED"
-	codeForbidden       = "FORBIDDEN"
-	codeNotFound        = "NOT_FOUND"
-	codeInternalError   = "INTERNAL_ERROR"
 )
 
 type postService interface {
@@ -40,25 +34,6 @@ type updatePostBody struct {
 	Content string `json:"content"`
 }
 
-type successEnvelope struct {
-	Success   bool        `json:"success"`
-	Data      interface{} `json:"data,omitempty"`
-	Message   string      `json:"message,omitempty"`
-	RequestID string      `json:"request_id,omitempty"`
-}
-
-type errorEnvelope struct {
-	Success   bool      `json:"success"`
-	Error     errorBody `json:"error"`
-	RequestID string    `json:"request_id,omitempty"`
-}
-
-type errorBody struct {
-	Code    string      `json:"code"`
-	Message string      `json:"message"`
-	Details interface{} `json:"details,omitempty"`
-}
-
 func NewPostHandler(svc service.PostService) *PostHandler {
 	return &PostHandler{svc: svc}
 }
@@ -67,19 +42,24 @@ func (h *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
 	rid := middleware.GetRequestID(r.Context())
 	userID := middleware.GetAuthenticatedUserID(r.Context())
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, rid, codeUnauthenticated, "missing authenticated user", nil)
+		writeError(w, http.StatusUnauthorized, rid, apperrors.CodeUnauthenticated, "missing authenticated user")
 		return
 	}
 
 	var body createPostBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, rid, codeBadRequest, "invalid JSON body", nil)
+		writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "invalid JSON body")
 		return
 	}
 
 	post, err := h.svc.CreatePost(r.Context(), userID, body.Content)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, rid, codeInternalError, err.Error(), nil)
+		switch {
+		case errors.Is(err, service.ErrValidation):
+			writeError(w, http.StatusBadRequest, rid, apperrors.CodeValidationError, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, rid, apperrors.CodeInternalError, err.Error())
+		}
 		return
 	}
 
@@ -90,17 +70,17 @@ func (h *PostHandler) GetPost(w http.ResponseWriter, r *http.Request) {
 	rid := middleware.GetRequestID(r.Context())
 	postID, ok := postIDFromPath(r.URL.Path)
 	if !ok {
-		writeError(w, http.StatusBadRequest, rid, codeBadRequest, "invalid post id in path", nil)
+		writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "invalid post id in path")
 		return
 	}
 
 	post, err := h.svc.GetPost(r.Context(), postID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, rid, codeInternalError, err.Error(), nil)
+		writeError(w, http.StatusInternalServerError, rid, apperrors.CodeInternalError, err.Error())
 		return
 	}
 	if post == nil {
-		writeError(w, http.StatusNotFound, rid, codeNotFound, "post not found", nil)
+		writeError(w, http.StatusNotFound, rid, apperrors.CodeNotFound, "post not found")
 		return
 	}
 
@@ -111,13 +91,13 @@ func (h *PostHandler) ListPostsByAuthor(w http.ResponseWriter, r *http.Request) 
 	rid := middleware.GetRequestID(r.Context())
 	authorID := strings.TrimSpace(r.URL.Query().Get("authorId"))
 	if authorID == "" {
-		writeError(w, http.StatusBadRequest, rid, codeBadRequest, "missing authorId query parameter", nil)
+		writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "missing authorId query parameter")
 		return
 	}
 
 	posts, err := h.svc.ListPostsByAuthor(r.Context(), authorID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, rid, codeInternalError, err.Error(), nil)
+		writeError(w, http.StatusInternalServerError, rid, apperrors.CodeInternalError, err.Error())
 		return
 	}
 
@@ -128,31 +108,33 @@ func (h *PostHandler) UpdatePost(w http.ResponseWriter, r *http.Request) {
 	rid := middleware.GetRequestID(r.Context())
 	userID := middleware.GetAuthenticatedUserID(r.Context())
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, rid, codeUnauthenticated, "missing authenticated user", nil)
+		writeError(w, http.StatusUnauthorized, rid, apperrors.CodeUnauthenticated, "missing authenticated user")
 		return
 	}
 
 	postID, ok := postIDFromPath(r.URL.Path)
 	if !ok {
-		writeError(w, http.StatusBadRequest, rid, codeBadRequest, "invalid post id in path", nil)
+		writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "invalid post id in path")
 		return
 	}
 
 	var body updatePostBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, rid, codeBadRequest, "invalid JSON body", nil)
+		writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "invalid JSON body")
 		return
 	}
 
 	post, err := h.svc.UpdatePost(r.Context(), userID, postID, body.Content)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrValidation):
+			writeError(w, http.StatusBadRequest, rid, apperrors.CodeValidationError, err.Error())
 		case errors.Is(err, service.ErrForbidden):
-			writeError(w, http.StatusForbidden, rid, codeForbidden, err.Error(), nil)
+			writeError(w, http.StatusForbidden, rid, apperrors.CodeForbidden, err.Error())
 		case errors.Is(err, service.ErrPostNotFound):
-			writeError(w, http.StatusNotFound, rid, codeNotFound, err.Error(), nil)
+			writeError(w, http.StatusNotFound, rid, apperrors.CodeNotFound, err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, rid, codeInternalError, err.Error(), nil)
+			writeError(w, http.StatusInternalServerError, rid, apperrors.CodeInternalError, err.Error())
 		}
 		return
 	}
@@ -164,13 +146,13 @@ func (h *PostHandler) DeletePost(w http.ResponseWriter, r *http.Request) {
 	rid := middleware.GetRequestID(r.Context())
 	userID := middleware.GetAuthenticatedUserID(r.Context())
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, rid, codeUnauthenticated, "missing authenticated user", nil)
+		writeError(w, http.StatusUnauthorized, rid, apperrors.CodeUnauthenticated, "missing authenticated user")
 		return
 	}
 
 	postID, ok := postIDFromPath(r.URL.Path)
 	if !ok {
-		writeError(w, http.StatusBadRequest, rid, codeBadRequest, "invalid post id in path", nil)
+		writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "invalid post id in path")
 		return
 	}
 
@@ -178,11 +160,11 @@ func (h *PostHandler) DeletePost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrForbidden):
-			writeError(w, http.StatusForbidden, rid, codeForbidden, err.Error(), nil)
+			writeError(w, http.StatusForbidden, rid, apperrors.CodeForbidden, err.Error())
 		case errors.Is(err, service.ErrPostNotFound):
-			writeError(w, http.StatusNotFound, rid, codeNotFound, err.Error(), nil)
+			writeError(w, http.StatusNotFound, rid, apperrors.CodeNotFound, err.Error())
 		default:
-			writeError(w, http.StatusInternalServerError, rid, codeInternalError, err.Error(), nil)
+			writeError(w, http.StatusInternalServerError, rid, apperrors.CodeInternalError, err.Error())
 		}
 		return
 	}
@@ -203,22 +185,10 @@ func postIDFromPath(path string) (string, bool) {
 }
 
 func writeSuccess(w http.ResponseWriter, status int, requestID string, data interface{}, message string) {
-	writeJSON(w, status, successEnvelope{
-		Success:   true,
-		Data:      data,
-		Message:   message,
-		RequestID: requestID,
-	})
+	apiresponse.Success(w, status, requestID, data, message)
 }
 
-func writeError(w http.ResponseWriter, status int, requestID string, code string, message string, details interface{}) {
-	writeJSON(w, status, errorEnvelope{
-		Success: false,
-		Error: errorBody{
-			Code:    code,
-			Message: message,
-			Details: details,
-		},
-		RequestID: requestID,
-	})
+func writeError(w http.ResponseWriter, status int, requestID string, code string, message string) {
+	_ = requestID
+	apiresponse.Error(w, status, code, message)
 }

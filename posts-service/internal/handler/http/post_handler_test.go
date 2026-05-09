@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"social-networking-platform/posts-service/internal/apiresponse"
+	"social-networking-platform/posts-service/internal/apperrors"
 	"social-networking-platform/posts-service/internal/domain"
 	"social-networking-platform/posts-service/internal/middleware"
 	"social-networking-platform/posts-service/internal/service"
@@ -94,12 +96,36 @@ func TestCreatePost_Created(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d body=%s", w.Code, http.StatusCreated, w.Body.String())
 	}
-	var body successEnvelope
+	var body apiresponse.SuccessEnvelope
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
 	if !body.Success {
 		t.Fatal("expected success envelope")
+	}
+}
+
+func TestCreatePost_ValidationError(t *testing.T) {
+	h := NewPostHandler(&mockPostService{
+		createPostFunc: func(ctx context.Context, authorID string, content string) (*domain.Post, error) {
+			return nil, service.ErrValidation
+		},
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/posts", strings.NewReader(`{"content":""}`))
+	r = r.WithContext(requestContextWithIDs())
+
+	h.CreatePost(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	var body apiresponse.ErrorEnvelope
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if body.Error != apperrors.CodeValidationError || body.Status != http.StatusBadRequest {
+		t.Fatalf("unexpected error body: %+v", body)
 	}
 }
 
@@ -157,6 +183,30 @@ func TestUpdatePost_Forbidden(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d body=%s", w.Code, http.StatusForbidden, w.Body.String())
+	}
+}
+
+func TestUpdatePost_ValidationError(t *testing.T) {
+	h := NewPostHandler(&mockPostService{
+		updatePostFunc: func(ctx context.Context, requesterID string, postID string, content string) (*domain.Post, error) {
+			return nil, service.ErrValidation
+		},
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/posts/post-1", strings.NewReader(`{"content":"   "}`))
+	r = r.WithContext(requestContextWithIDs())
+
+	h.UpdatePost(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d body=%s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+	var body apiresponse.ErrorEnvelope
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if body.Error != apperrors.CodeValidationError || body.Status != http.StatusBadRequest {
+		t.Fatalf("unexpected error body: %+v", body)
 	}
 }
 
