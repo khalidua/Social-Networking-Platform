@@ -24,9 +24,12 @@ type mockUserService struct {
 	updateMeErr   error
 	getByIDResp   *domain.User
 	getByIDErr    error
-	followErr     error
-	unfollowErr   error
-	lastFollowIDs [2]string
+	followErr         error
+	unfollowErr       error
+	lastFollowIDs     [2]string
+	listFollowersResp []string
+	listFollowersErr  error
+	lastListFollowee  string
 }
 
 func (m *mockUserService) GetMe(ctx context.Context, userID string) (*domain.User, error) {
@@ -58,6 +61,17 @@ func (m *mockUserService) FollowUser(ctx context.Context, followerID, followeeID
 func (m *mockUserService) UnfollowUser(ctx context.Context, followerID, followeeID string) error {
 	m.lastFollowIDs[0], m.lastFollowIDs[1] = followerID, followeeID
 	return m.unfollowErr
+}
+
+func (m *mockUserService) ListFollowerIDs(ctx context.Context, followeeID string) ([]string, error) {
+	m.lastListFollowee = followeeID
+	if m.listFollowersErr != nil {
+		return nil, m.listFollowersErr
+	}
+	if m.listFollowersResp != nil {
+		return m.listFollowersResp, nil
+	}
+	return []string{}, nil
 }
 
 func ctxWithRequestID(t *testing.T) context.Context {

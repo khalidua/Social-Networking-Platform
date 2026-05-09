@@ -98,6 +98,25 @@ func (h *UserHandler) UnfollowUser(w http.ResponseWriter, r *http.Request) {
 	h.followMutation(w, r, false)
 }
 
+// ListFollowers exposes GET /api/v1/users/{id}/followers for service-to-service fan-out (e.g. feed-service).
+func (h *UserHandler) ListFollowers(w http.ResponseWriter, r *http.Request) {
+	rid := middleware.GetRequestID(r.Context())
+	followeeID, ok := userIDFromFollowersPath(r.URL.Path)
+	if !ok {
+		apiresponse.Error(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "invalid user id in path", nil)
+		return
+	}
+	ids, err := h.svc.ListFollowerIDs(r.Context(), followeeID)
+	if err != nil {
+		apiresponse.Error(w, http.StatusInternalServerError, rid, apperrors.CodeInternalError, err.Error(), nil)
+		return
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	apiresponse.Success(w, http.StatusOK, rid, map[string][]string{"follower_ids": ids}, "")
+}
+
 func (h *UserHandler) followMutation(w http.ResponseWriter, r *http.Request, follow bool) {
 	rid := middleware.GetRequestID(r.Context())
 	followerID := strings.TrimSpace(r.Header.Get(headerXUserID))
@@ -148,6 +167,20 @@ func userIDFromResourcePath(path string, stripFollowSuffix bool) (string, bool) 
 		return "", false
 	}
 	if strings.Contains(rest, "/") {
+		return "", false
+	}
+	return rest, true
+}
+
+func userIDFromFollowersPath(path string) (string, bool) {
+	const prefix = "/api/v1/users/"
+	const suf = "/followers"
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suf) {
+		return "", false
+	}
+	rest := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suf)
+	rest = strings.Trim(rest, "/")
+	if rest == "" || rest == "me" || strings.Contains(rest, "/") {
 		return "", false
 	}
 	return rest, true

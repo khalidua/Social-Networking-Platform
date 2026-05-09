@@ -26,6 +26,8 @@ type Config struct {
 	KafkaBrokers          string
 	KafkaTopicPostCreated string
 	KafkaTopicFollowed    string
+	// UsersServiceURL base URL for users-service (e.g. http://users-service:8080). Used to resolve follower lists for post fan-out.
+	UsersServiceURL string
 }
 
 func Load() Config {
@@ -46,6 +48,7 @@ func Load() Config {
 	cfg.KafkaBrokers = strings.TrimSpace(getEnv("KAFKA_BROKERS", ""))
 	cfg.KafkaTopicPostCreated = getEnv("KAFKA_TOPIC_POST_CREATED", "post.created")
 	cfg.KafkaTopicFollowed = getEnv("KAFKA_TOPIC_USER_FOLLOWED", "user.followed")
+	cfg.UsersServiceURL = strings.TrimSpace(getEnv("USERS_SERVICE_URL", ""))
 
 	validate(cfg)
 	return cfg

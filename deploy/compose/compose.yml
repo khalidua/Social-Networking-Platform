@@ -200,6 +200,7 @@ services:
     depends_on:
       - redis
       - kafka
+      - users-service
     environment:
       SERVICE_NAME: feed-service
       APP_ENV: development
@@ -213,6 +214,7 @@ services:
       KAFKA_BROKERS: kafka:29092
       KAFKA_TOPIC_POST_CREATED: post.created
       KAFKA_TOPIC_USER_FOLLOWED: user.followed
+      USERS_SERVICE_URL: http://users-service:8082
     ports:
       - "8084:8084"
     networks:

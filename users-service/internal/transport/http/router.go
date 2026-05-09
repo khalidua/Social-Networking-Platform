@@ -31,6 +31,15 @@ func NewRouter(serviceName string, userHandler *handlers.UserHandler) http.Handl
 	mux.HandleFunc("/api/v1/users/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
+		if strings.HasSuffix(path, "/followers") {
+			if r.Method != http.MethodGet {
+				methodNotAllowed(w, r)
+				return
+			}
+			userHandler.ListFollowers(w, r)
+			return
+		}
+
 		if strings.HasSuffix(path, "/follow") {
 			switch r.Method {
 			case http.MethodPost:

@@ -34,6 +34,8 @@ type UserService interface {
 	GetByID(ctx context.Context, id string) (*domain.User, error)
 	FollowUser(ctx context.Context, followerID, followeeID string) error
 	UnfollowUser(ctx context.Context, followerID, followeeID string) error
+	// ListFollowerIDs returns follower user ids for a given followee (for feed fan-out, etc.).
+	ListFollowerIDs(ctx context.Context, followeeID string) ([]string, error)
 }
 
 type userService struct {
@@ -173,6 +175,13 @@ func (s *userService) UnfollowUser(ctx context.Context, followerID, followeeID s
 	return s.follows.Unfollow(ctx, domain.Follow{FollowerID: followerID, FolloweeID: followeeID})
 }
 
+func (s *userService) ListFollowerIDs(ctx context.Context, followeeID string) ([]string, error) {
+	if strings.TrimSpace(followeeID) == "" {
+		return nil, errors.New("missing user id")
+	}
+	return s.follows.ListFollowerIDs(ctx, followeeID)
+}
+
 type StubUserService struct{}
 
 func NewStubUserService() *StubUserService {
@@ -193,4 +202,8 @@ func (s *StubUserService) FollowUser(ctx context.Context, followerID, followeeID
 }
 func (s *StubUserService) UnfollowUser(ctx context.Context, followerID, followeeID string) error {
 	return nil
+}
+
+func (s *StubUserService) ListFollowerIDs(ctx context.Context, followeeID string) ([]string, error) {
+	return nil, nil
 }

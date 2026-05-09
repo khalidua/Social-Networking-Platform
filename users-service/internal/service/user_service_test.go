@@ -57,6 +57,24 @@ func TestUpdateMe_Validation(t *testing.T) {
 // maxNameRunes duplicated from service/constants for assertion size only.
 const maxNameRunes = 120
 
+func TestListFollowerIDs_InMemory(t *testing.T) {
+	ctx := context.Background()
+	users := postgres.NewInMemoryUserRepository()
+	follows := postgres.NewInMemoryFollowRepository()
+	svc := service.NewUserService(users, follows, &recordPublisher{})
+
+	_ = svc.FollowUser(ctx, "alice", "bob")
+	_ = svc.FollowUser(ctx, "carol", "bob")
+
+	ids, err := svc.ListFollowerIDs(ctx, "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("want 2 followers, got %v", ids)
+	}
+}
+
 func TestFollowUser_SelfForbidden(t *testing.T) {
 	ctx := context.Background()
 	svc := service.NewUserService(

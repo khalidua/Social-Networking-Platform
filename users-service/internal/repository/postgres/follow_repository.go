@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 
 	"social-networking-platform/users-service/internal/domain"
@@ -10,6 +12,8 @@ import (
 type FollowRepository interface {
 	Follow(ctx context.Context, rel domain.Follow) (added bool, err error)
 	Unfollow(ctx context.Context, rel domain.Follow) error
+	// ListFollowerIDs returns users who follow followeeID (following_id in DB).
+	ListFollowerIDs(ctx context.Context, followeeID string) ([]string, error)
 }
 
 type StubFollowRepository struct{}
@@ -24,6 +28,10 @@ func (r *StubFollowRepository) Follow(ctx context.Context, rel domain.Follow) (b
 
 func (r *StubFollowRepository) Unfollow(ctx context.Context, rel domain.Follow) error {
 	return nil
+}
+
+func (r *StubFollowRepository) ListFollowerIDs(ctx context.Context, followeeID string) ([]string, error) {
+	return nil, nil
 }
 
 // InMemoryFollowRepository stores follower→followee edges in-process (dev / tests).
@@ -58,4 +66,19 @@ func (r *InMemoryFollowRepository) Unfollow(ctx context.Context, rel domain.Foll
 	defer r.mu.Unlock()
 	delete(r.follows, followKey(rel))
 	return nil
+}
+
+func (r *InMemoryFollowRepository) ListFollowerIDs(ctx context.Context, followeeID string) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	suffix := "\x00" + followeeID
+	var out []string
+	for k := range r.follows {
+		if strings.HasSuffix(k, suffix) {
+			followerID := strings.TrimSuffix(k, suffix)
+			out = append(out, followerID)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
