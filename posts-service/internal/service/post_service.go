@@ -3,77 +3,178 @@ package service
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"social-networking-platform/posts-service/internal/domain"
-	"social-networking-platform/posts-service/internal/repository/kafka"
+	postkafka "social-networking-platform/posts-service/internal/repository/kafka"
 	"social-networking-platform/posts-service/internal/repository/postgres"
 )
 
-const maxContentRunes = 10000
-
 var (
-	ErrEmptyContent   = errors.New("content is required")
-	ErrContentTooLong = errors.New("content too long")
-	ErrMissingAuthor  = errors.New("missing author id")
+	ErrForbidden    = errors.New("forbidden")
+	ErrPostNotFound = errors.New("post not found")
+	ErrValidation   = errors.New("validation error")
 )
 
+const maxContentRunes = 2000
+
 type PostService interface {
-	CreatePost(ctx context.Context, authorID, content string) (*domain.Post, error)
+	CreatePost(ctx context.Context, authorID string, content string) (*domain.Post, error)
+	GetPost(ctx context.Context, id string) (*domain.Post, error)
+	ListPostsByAuthor(ctx context.Context, authorID string) ([]domain.Post, error)
+	UpdatePost(ctx context.Context, requesterID string, postID string, content string) (*domain.Post, error)
+	DeletePost(ctx context.Context, requesterID string, postID string) error
 }
 
 type postService struct {
-	repo postgres.PostRepository
-	pub  kafka.PostProducer
+	repo   postgres.PostRepository
+	events postkafka.PostProducer
+	newID  func() string
 }
 
-func NewPostService(repo postgres.PostRepository, pub kafka.PostProducer) PostService {
-	if pub == nil {
-		pub = kafka.NoopPostProducer()
+func NewPostService(repo postgres.PostRepository, publisher postkafka.PostProducer) PostService {
+	if publisher == nil {
+		publisher = postkafka.NewStubPostProducer()
 	}
-	return &postService{repo: repo, pub: pub}
+	return &postService{
+		repo:   repo,
+		events: publisher,
+		newID:  newPostID,
+	}
 }
 
-func newPostID() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
+func (s *postService) CreatePost(ctx context.Context, authorID string, content string) (*domain.Post, error) {
+	trimmedAuthorID := strings.TrimSpace(authorID)
+	trimmedContent := strings.TrimSpace(content)
+	if err := validatePostContent(trimmedContent); err != nil {
+		return nil, err
 	}
-	return hex.EncodeToString(b[:]), nil
+
+	post := &domain.Post{
+		ID:       s.newID(),
+		AuthorID: trimmedAuthorID,
+		Content:  trimmedContent,
+	}
+
+	if err := s.repo.CreatePost(ctx, post); err != nil {
+		return nil, err
+	}
+	if err := s.events.PublishCreated(ctx, *post); err != nil {
+		log.Printf("posts-service: kafka publish post.created: %v", err)
+	}
+
+	return post, nil
 }
 
-func (s *postService) CreatePost(ctx context.Context, authorID, content string) (*domain.Post, error) {
-	authorID = strings.TrimSpace(authorID)
-	content = strings.TrimSpace(content)
-	if authorID == "" {
-		return nil, ErrMissingAuthor
+func (s *postService) GetPost(ctx context.Context, id string) (*domain.Post, error) {
+	return s.repo.GetPostByID(ctx, strings.TrimSpace(id))
+}
+
+func (s *postService) ListPostsByAuthor(ctx context.Context, authorID string) ([]domain.Post, error) {
+	return s.repo.GetPostsByAuthor(ctx, strings.TrimSpace(authorID))
+}
+
+func (s *postService) UpdatePost(ctx context.Context, requesterID string, postID string, content string) (*domain.Post, error) {
+	trimmedRequesterID := strings.TrimSpace(requesterID)
+	trimmedContent := strings.TrimSpace(content)
+	if err := validatePostContent(trimmedContent); err != nil {
+		return nil, err
 	}
-	if content == "" {
-		return nil, ErrEmptyContent
-	}
-	if utf8.RuneCountInString(content) > maxContentRunes {
-		return nil, ErrContentTooLong
-	}
-	id, err := newPostID()
+
+	post, err := s.repo.GetPostByID(ctx, strings.TrimSpace(postID))
 	if err != nil {
 		return nil, err
 	}
-	post := domain.Post{
-		ID:        id,
-		AuthorID:  authorID,
-		Content:   content,
-		CreatedAt: time.Now().UnixMilli(),
+	if post == nil {
+		return nil, ErrPostNotFound
 	}
-	if err := s.repo.Save(post); err != nil {
+	if post.AuthorID != trimmedRequesterID {
+		return nil, ErrForbidden
+	}
+
+	post.Content = trimmedContent
+	if err := s.repo.UpdatePost(ctx, post); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrPostNotFound
+		}
 		return nil, err
 	}
-	if err := s.pub.PublishCreated(post); err != nil {
-		log.Printf("posts-service: kafka publish post.created: %v", err)
+
+	return post, nil
+}
+
+func (s *postService) DeletePost(ctx context.Context, requesterID string, postID string) error {
+	post, err := s.repo.GetPostByID(ctx, strings.TrimSpace(postID))
+	if err != nil {
+		return err
 	}
-	return &post, nil
+	if post == nil {
+		return ErrPostNotFound
+	}
+	if post.AuthorID != strings.TrimSpace(requesterID) {
+		return ErrForbidden
+	}
+
+	if err := s.repo.DeletePost(ctx, post.ID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrPostNotFound
+		}
+		return err
+	}
+
+	return nil
+}
+
+func newPostID() string {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		panic("posts-service: unable to generate post id")
+	}
+	return hex.EncodeToString(buf[:])
+}
+
+func validatePostContent(content string) error {
+	if content == "" {
+		return validation("content is required")
+	}
+	if utf8.RuneCountInString(content) > maxContentRunes {
+		return validation(fmt.Sprintf("content must be at most %d characters", maxContentRunes))
+	}
+	return nil
+}
+
+func validation(msg string) error {
+	return fmt.Errorf("%s: %w", msg, ErrValidation)
+}
+
+type StubPostService struct{}
+
+func NewStubPostService() *StubPostService {
+	return &StubPostService{}
+}
+
+func (s *StubPostService) CreatePost(ctx context.Context, authorID string, content string) (*domain.Post, error) {
+	return nil, nil
+}
+
+func (s *StubPostService) GetPost(ctx context.Context, id string) (*domain.Post, error) {
+	return nil, nil
+}
+
+func (s *StubPostService) ListPostsByAuthor(ctx context.Context, authorID string) ([]domain.Post, error) {
+	return nil, nil
+}
+
+func (s *StubPostService) UpdatePost(ctx context.Context, requesterID string, postID string, content string) (*domain.Post, error) {
+	return nil, nil
+}
+
+func (s *StubPostService) DeletePost(ctx context.Context, requesterID string, postID string) error {
+	return nil
 }

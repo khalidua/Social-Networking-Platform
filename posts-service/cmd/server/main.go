@@ -20,6 +20,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("bootstrap failed: %v", err)
 	}
+	defer func() {
+		if err := app.Close(); err != nil {
+			log.Printf("app close failed: %v", err)
+		}
+	}()
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -46,10 +51,6 @@ func main() {
 
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("graceful shutdown failed: %v", err)
-	}
-
-	if err := app.Close(); err != nil {
-		log.Printf("shutdown resources: %v", err)
 	}
 
 	log.Printf("%s stopped", cfg.ServiceName)

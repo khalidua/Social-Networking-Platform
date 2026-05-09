@@ -1,16 +1,19 @@
 package postgres
 
 import (
+	"context"
+	"sort"
 	"sync"
 
 	"social-networking-platform/posts-service/internal/domain"
 )
 
 type PostRepository interface {
-	Save(post domain.Post) error
-	GetByID(id string) (*domain.Post, error)
-	Update(post domain.Post) error
-	Delete(id string) error
+	CreatePost(ctx context.Context, post *domain.Post) error
+	GetPostByID(ctx context.Context, id string) (*domain.Post, error)
+	GetPostsByAuthor(ctx context.Context, authorID string) ([]domain.Post, error)
+	UpdatePost(ctx context.Context, post *domain.Post) error
+	DeletePost(ctx context.Context, id string) error
 }
 
 type StubPostRepository struct{}
@@ -19,55 +22,92 @@ func NewStubPostRepository() *StubPostRepository {
 	return &StubPostRepository{}
 }
 
-func (r *StubPostRepository) Save(post domain.Post) error { return nil }
+func (r *StubPostRepository) CreatePost(_ context.Context, post *domain.Post) error {
+	return nil
+}
 
-func (r *StubPostRepository) GetByID(id string) (*domain.Post, error) { return nil, nil }
+func (r *StubPostRepository) GetPostByID(_ context.Context, id string) (*domain.Post, error) {
+	return nil, nil
+}
 
-func (r *StubPostRepository) Update(post domain.Post) error { return nil }
+func (r *StubPostRepository) GetPostsByAuthor(_ context.Context, authorID string) ([]domain.Post, error) {
+	return nil, nil
+}
 
-func (r *StubPostRepository) Delete(id string) error { return nil }
+func (r *StubPostRepository) UpdatePost(_ context.Context, post *domain.Post) error {
+	return nil
+}
 
-// InMemoryPostRepository persists posts in-process (dev / single-node until SQL repo exists).
+func (r *StubPostRepository) DeletePost(_ context.Context, id string) error {
+	return nil
+}
+
+// InMemoryPostRepository keeps posts in-process for lightweight tests and local wiring.
 type InMemoryPostRepository struct {
-	mu   sync.RWMutex
-	byID map[string]domain.Post
+	mu    sync.RWMutex
+	posts map[string]*domain.Post
 }
 
 func NewInMemoryPostRepository() *InMemoryPostRepository {
-	return &InMemoryPostRepository{byID: make(map[string]domain.Post)}
+	return &InMemoryPostRepository{
+		posts: make(map[string]*domain.Post),
+	}
 }
 
-func (r *InMemoryPostRepository) Save(post domain.Post) error {
+func (r *InMemoryPostRepository) CreatePost(_ context.Context, post *domain.Post) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.byID[post.ID] = post
+
+	cp := *post
+	r.posts[post.ID] = &cp
 	return nil
 }
 
-func (r *InMemoryPostRepository) GetByID(id string) (*domain.Post, error) {
+func (r *InMemoryPostRepository) GetPostByID(_ context.Context, id string) (*domain.Post, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	p, ok := r.byID[id]
+
+	post, ok := r.posts[id]
 	if !ok {
 		return nil, nil
 	}
-	copy := p
-	return &copy, nil
+
+	cp := *post
+	return &cp, nil
 }
 
-func (r *InMemoryPostRepository) Update(post domain.Post) error {
+func (r *InMemoryPostRepository) GetPostsByAuthor(_ context.Context, authorID string) ([]domain.Post, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	posts := make([]domain.Post, 0)
+	for _, post := range r.posts {
+		if post.AuthorID != authorID {
+			continue
+		}
+		posts = append(posts, *post)
+	}
+
+	sort.Slice(posts, func(i, j int) bool {
+		return posts[i].CreatedAt.After(posts[j].CreatedAt)
+	})
+
+	return posts, nil
+}
+
+func (r *InMemoryPostRepository) UpdatePost(_ context.Context, post *domain.Post) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.byID[post.ID]; !ok {
-		return nil
-	}
-	r.byID[post.ID] = post
+
+	cp := *post
+	r.posts[post.ID] = &cp
 	return nil
 }
 
-func (r *InMemoryPostRepository) Delete(id string) error {
+func (r *InMemoryPostRepository) DeletePost(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.byID, id)
+
+	delete(r.posts, id)
 	return nil
 }

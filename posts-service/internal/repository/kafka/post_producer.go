@@ -3,96 +3,106 @@ package kafka
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
-	"social-networking-platform/posts-service/internal/domain"
-
 	kafkago "github.com/segmentio/kafka-go"
+
+	"social-networking-platform/posts-service/internal/domain"
 )
 
-// PostCreatedV1 must stay aligned with feed-service/internal/repository/kafka/post_consumer.go.
-type PostCreatedV1 struct {
+// PostProducer emits post.created for feed-service consumption.
+type PostProducer interface {
+	PublishCreated(ctx context.Context, post domain.Post) error
+	Close() error
+}
+
+type StubPostProducer struct{}
+
+func NewStubPostProducer() *StubPostProducer {
+	return &StubPostProducer{}
+}
+
+func (p *StubPostProducer) PublishCreated(ctx context.Context, post domain.Post) error {
+	return nil
+}
+
+func (p *StubPostProducer) Close() error { return nil }
+
+type KafkaPostProducer struct {
+	w *kafkago.Writer
+}
+
+// postCreatedFeedV1 matches feed-service/internal/repository/kafka/post_consumer.go.
+type postCreatedFeedV1 struct {
 	PostID    string `json:"post_id"`
 	AuthorID  string `json:"author_id"`
 	Content   string `json:"content"`
 	CreatedAt int64  `json:"created_at"`
 }
 
-type PostProducer interface {
-	PublishCreated(post domain.Post) error
-	Close() error
-}
-
-type noopPostProducer struct{}
-
-func (noopPostProducer) PublishCreated(post domain.Post) error { return nil }
-
-func (noopPostProducer) Close() error { return nil }
-
-// NoopPostProducer is used when Kafka is disabled or for tests.
-func NoopPostProducer() PostProducer {
-	return noopPostProducer{}
-}
-
-type kafkaPostProducer struct {
-	writer *kafkago.Writer
-}
-
-func splitBrokers(csv string) []string {
-	csv = strings.TrimSpace(csv)
-	if csv == "" {
+func parseBrokers(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
 		return nil
 	}
-	parts := strings.Split(csv, ",")
+	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if s := strings.TrimSpace(p); s != "" {
-			out = append(out, s)
+	for _, broker := range parts {
+		broker = strings.TrimSpace(broker)
+		if broker != "" {
+			out = append(out, broker)
 		}
 	}
 	return out
 }
 
-// NewPostProducer returns a Kafka writer, or a no-op producer when brokers or topic are unset.
-func NewPostProducer(brokersCSV, topic string) PostProducer {
-	brokers := splitBrokers(brokersCSV)
-	topic = strings.TrimSpace(topic)
-	if len(brokers) == 0 || topic == "" {
-		return NoopPostProducer()
+func NewKafkaPostProducer(brokersCSV string, topic string) (*KafkaPostProducer, error) {
+	brokers := parseBrokers(brokersCSV)
+	if len(brokers) == 0 || strings.TrimSpace(topic) == "" {
+		return nil, errors.New("kafka brokers and topic are required")
 	}
-	return &kafkaPostProducer{
-		writer: &kafkago.Writer{
-			Addr:  kafkago.TCP(brokers...),
-			Topic: topic,
-		},
+
+	w := &kafkago.Writer{
+		Addr:                   kafkago.TCP(brokers...),
+		Topic:                  topic,
+		Balancer:               &kafkago.LeastBytes{},
+		AllowAutoTopicCreation: true,
 	}
+
+	return &KafkaPostProducer{w: w}, nil
 }
 
-func (p *kafkaPostProducer) PublishCreated(post domain.Post) error {
-	event := PostCreatedV1{
+func (p *KafkaPostProducer) PublishCreated(ctx context.Context, post domain.Post) error {
+	if p == nil || p.w == nil {
+		return errors.New("kafka writer not initialized")
+	}
+
+	ts := post.CreatedAt.UnixMilli()
+	if ts == 0 {
+		ts = time.Now().UnixMilli()
+	}
+
+	body, err := json.Marshal(postCreatedFeedV1{
 		PostID:    post.ID,
 		AuthorID:  post.AuthorID,
 		Content:   post.Content,
-		CreatedAt: post.CreatedAt,
-	}
-	if event.CreatedAt == 0 {
-		event.CreatedAt = time.Now().UnixMilli()
-	}
-	payload, err := json.Marshal(event)
+		CreatedAt: ts,
+	})
 	if err != nil {
 		return err
 	}
-	msg := kafkago.Message{
+
+	return p.w.WriteMessages(ctx, kafkago.Message{
 		Key:   []byte(post.AuthorID),
-		Value: payload,
-	}
-	return p.writer.WriteMessages(context.Background(), msg)
+		Value: body,
+	})
 }
 
-func (p *kafkaPostProducer) Close() error {
-	if p == nil || p.writer == nil {
+func (p *KafkaPostProducer) Close() error {
+	if p == nil || p.w == nil {
 		return nil
 	}
-	return p.writer.Close()
+	return p.w.Close()
 }

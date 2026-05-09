@@ -21,12 +21,15 @@ type Config struct {
 	LogLevel    string
 	HTTP        HTTPConfig
 
-	DBHost                string
-	DBPort                string
-	DBName                string
-	DBUser                string
-	DBPassword            string
-	DBSSLMode             string
+	DBHost     string
+	DBPort     string
+	DBName     string
+	DBUser     string
+	DBPassword string
+	DBSSLMode  string
+
+	MigrationsDir string
+
 	KafkaBrokers          string
 	KafkaTopicPostCreated string
 }
@@ -50,6 +53,7 @@ func Load() Config {
 	cfg.DBUser = getEnv("DB_USER", "postgres")
 	cfg.DBPassword = getEnv("DB_PASSWORD", "postgres")
 	cfg.DBSSLMode = getEnv("DB_SSLMODE", "disable")
+	cfg.MigrationsDir = getEnv("MIGRATIONS_DIR", "migrations")
 	cfg.KafkaBrokers = strings.TrimSpace(getEnv("KAFKA_BROKERS", ""))
 	cfg.KafkaTopicPostCreated = getEnv("KAFKA_TOPIC_POST_CREATED", "post.created")
 

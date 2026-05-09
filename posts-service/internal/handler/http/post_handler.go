@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"strings"
 
+	"social-networking-platform/posts-service/internal/apiresponse"
+	"social-networking-platform/posts-service/internal/apperrors"
+	"social-networking-platform/posts-service/internal/middleware"
 	"social-networking-platform/posts-service/internal/service"
 )
 
@@ -13,112 +16,169 @@ type PostHandler struct {
 	svc service.PostService
 }
 
-func NewPostHandler(svc service.PostService) *PostHandler {
-	return &PostHandler{svc: svc}
-}
-
 type createPostBody struct {
 	Content string `json:"content"`
 }
 
-func (h *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
-			"success": false,
-			"error": map[string]any{
-				"code":    "METHOD_NOT_ALLOWED",
-				"message": "only POST is supported",
-			},
-		})
-		return
-	}
+type updatePostBody struct {
+	Content string `json:"content"`
+}
 
-	userID := strings.TrimSpace(r.Header.Get("X-User-ID"))
+func NewPostHandler(svc service.PostService) *PostHandler {
+	return &PostHandler{svc: svc}
+}
+
+func (h *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
+	rid := middleware.GetRequestID(r.Context())
+	userID := middleware.GetAuthenticatedUserID(r.Context())
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{
-			"success": false,
-			"error": map[string]any{
-				"code":    "UNAUTHORIZED",
-				"message": "missing user id",
-			},
-		})
+		writeError(w, http.StatusUnauthorized, rid, apperrors.CodeUnauthenticated, "missing authenticated user")
 		return
 	}
 
 	var body createPostBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"success": false,
-			"error": map[string]any{
-				"code":    "BAD_REQUEST",
-				"message": "invalid JSON body",
-			},
-		})
+		writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "invalid JSON body")
 		return
 	}
 
 	post, err := h.svc.CreatePost(r.Context(), userID, body.Content)
 	if err != nil {
-		status := http.StatusInternalServerError
-		code := "INTERNAL_ERROR"
 		switch {
-		case errors.Is(err, service.ErrEmptyContent),
-			errors.Is(err, service.ErrContentTooLong),
-			errors.Is(err, service.ErrMissingAuthor):
-			status = http.StatusBadRequest
-			code = "VALIDATION_ERROR"
-			if errors.Is(err, service.ErrMissingAuthor) {
-				code = "BAD_REQUEST"
-			}
+		case errors.Is(err, service.ErrValidation):
+			writeError(w, http.StatusBadRequest, rid, apperrors.CodeValidationError, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, rid, apperrors.CodeInternalError, err.Error())
 		}
-		writeJSON(w, status, map[string]any{
-			"success": false,
-			"error": map[string]any{
-				"code":    code,
-				"message": err.Error(),
-			},
-		})
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"success": true,
-		"data": map[string]any{
-			"id":         post.ID,
-			"author_id":  post.AuthorID,
-			"content":    post.Content,
-			"created_at": post.CreatedAt,
-		},
-	})
+	writeSuccess(w, http.StatusCreated, rid, post, "")
 }
 
 func (h *PostHandler) GetPost(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]any{
-		"success": false,
-		"error": map[string]any{
-			"code":    "NOT_IMPLEMENTED",
-			"message": "GetPost is not implemented yet",
-		},
-	})
+	rid := middleware.GetRequestID(r.Context())
+	postID, ok := postIDFromPath(r.URL.Path)
+	if !ok {
+		writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "invalid post id in path")
+		return
+	}
+
+	post, err := h.svc.GetPost(r.Context(), postID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, rid, apperrors.CodeInternalError, err.Error())
+		return
+	}
+	if post == nil {
+		writeError(w, http.StatusNotFound, rid, apperrors.CodeNotFound, "post not found")
+		return
+	}
+
+	writeSuccess(w, http.StatusOK, rid, post, "")
+}
+
+func (h *PostHandler) ListPostsByAuthor(w http.ResponseWriter, r *http.Request) {
+	rid := middleware.GetRequestID(r.Context())
+	authorID := strings.TrimSpace(r.URL.Query().Get("authorId"))
+	if authorID == "" {
+		writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "missing authorId query parameter")
+		return
+	}
+
+	posts, err := h.svc.ListPostsByAuthor(r.Context(), authorID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, rid, apperrors.CodeInternalError, err.Error())
+		return
+	}
+
+	writeSuccess(w, http.StatusOK, rid, posts, "")
 }
 
 func (h *PostHandler) UpdatePost(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]any{
-		"success": false,
-		"error": map[string]any{
-			"code":    "NOT_IMPLEMENTED",
-			"message": "UpdatePost is not implemented yet",
-		},
-	})
+	rid := middleware.GetRequestID(r.Context())
+	userID := middleware.GetAuthenticatedUserID(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, rid, apperrors.CodeUnauthenticated, "missing authenticated user")
+		return
+	}
+
+	postID, ok := postIDFromPath(r.URL.Path)
+	if !ok {
+		writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "invalid post id in path")
+		return
+	}
+
+	var body updatePostBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "invalid JSON body")
+		return
+	}
+
+	post, err := h.svc.UpdatePost(r.Context(), userID, postID, body.Content)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrValidation):
+			writeError(w, http.StatusBadRequest, rid, apperrors.CodeValidationError, err.Error())
+		case errors.Is(err, service.ErrForbidden):
+			writeError(w, http.StatusForbidden, rid, apperrors.CodeForbidden, err.Error())
+		case errors.Is(err, service.ErrPostNotFound):
+			writeError(w, http.StatusNotFound, rid, apperrors.CodeNotFound, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, rid, apperrors.CodeInternalError, err.Error())
+		}
+		return
+	}
+
+	writeSuccess(w, http.StatusOK, rid, post, "")
 }
 
 func (h *PostHandler) DeletePost(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]any{
-		"success": false,
-		"error": map[string]any{
-			"code":    "NOT_IMPLEMENTED",
-			"message": "DeletePost is not implemented yet",
-		},
-	})
+	rid := middleware.GetRequestID(r.Context())
+	userID := middleware.GetAuthenticatedUserID(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, rid, apperrors.CodeUnauthenticated, "missing authenticated user")
+		return
+	}
+
+	postID, ok := postIDFromPath(r.URL.Path)
+	if !ok {
+		writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "invalid post id in path")
+		return
+	}
+
+	err := h.svc.DeletePost(r.Context(), userID, postID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrForbidden):
+			writeError(w, http.StatusForbidden, rid, apperrors.CodeForbidden, err.Error())
+		case errors.Is(err, service.ErrPostNotFound):
+			writeError(w, http.StatusNotFound, rid, apperrors.CodeNotFound, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, rid, apperrors.CodeInternalError, err.Error())
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func postIDFromPath(path string) (string, bool) {
+	const prefix = "/api/v1/posts/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	rest := strings.Trim(strings.TrimPrefix(path, prefix), "/")
+	if rest == "" || strings.Contains(rest, "/") {
+		return "", false
+	}
+	return rest, true
+}
+
+func writeSuccess(w http.ResponseWriter, status int, requestID string, data interface{}, message string) {
+	apiresponse.Success(w, status, requestID, data, message)
+}
+
+func writeError(w http.ResponseWriter, status int, requestID string, code string, message string) {
+	_ = requestID
+	apiresponse.Error(w, status, code, message)
 }
