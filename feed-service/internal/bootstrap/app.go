@@ -10,6 +10,8 @@ import (
 	"social-networking-platform/feed-service/internal/config"
 	kafkarepo "social-networking-platform/feed-service/internal/repository/kafka"
 	httptransport "social-networking-platform/feed-service/internal/transport/http"
+	redisrepo "social-networking-platform/feed-service/internal/repository/redis"
+	goredis "github.com/redis/go-redis/v9"
 )
 
 type App struct {
@@ -17,6 +19,7 @@ type App struct {
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	follower kafkarepo.FollowConsumer
+	feedRepo redisrepo.FeedRepository
 }
 
 func NewApp(cfg config.Config) (*App, error) {
@@ -29,10 +32,18 @@ func NewApp(cfg config.Config) (*App, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+
+	redisClient := goredis.NewClient(&goredis.Options{
+	Addr: "localhost:6379",
+	})
+
+	feedRepo := redisrepo.NewFeedRepository(redisClient)
+
 	app := &App{
-		Router:   router,
-		cancel:   cancel,
-		follower: cons,
+	Router:   router,
+	cancel:   cancel,
+	follower: cons,
+	feedRepo: feedRepo,
 	}
 	app.wg.Add(1)
 	go func() {

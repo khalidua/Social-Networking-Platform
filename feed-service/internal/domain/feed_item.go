@@ -1,8 +1,8 @@
 package domain
 
 type FeedItem struct {
-	PostID    string
+	PostID    string 
 	AuthorID  string
 	Content   string
-	CreatedAt string
+	CreatedAt int64
 }
