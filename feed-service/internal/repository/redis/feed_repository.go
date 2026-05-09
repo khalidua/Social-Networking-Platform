@@ -74,11 +74,9 @@ func (r *redisFeedRepository) GetFeed(
 
 	for _, raw := range results {
 		var item domain.FeedItem
-
 		if err := json.Unmarshal([]byte(raw), &item); err != nil {
-			continue
+			return nil, fmt.Errorf("decode feed item: %w", err)
 		}
-
 		feed = append(feed, item)
 	}
 	return feed, nil

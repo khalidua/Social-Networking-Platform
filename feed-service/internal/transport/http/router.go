@@ -7,15 +7,18 @@ import (
 	"social-networking-platform/feed-service/internal/middleware"
 )
 
-func NewRouter(serviceName string) http.Handler {
+func NewRouter(
+	serviceName string,
+	feedHandler *handlers.FeedHandler,
+) http.Handler {
+
 	mux := http.NewServeMux()
 
 	healthHandler := handlers.NewHealthHandler(serviceName)
-	featureHandler := handlers.NewFeedHandler()
 
 	mux.HandleFunc("/health", healthHandler.Health)
 
-	mux.HandleFunc("/api/v1/feed", featureHandler.GetFeed)
+	mux.HandleFunc("/api/v1/feed", feedHandler.GetFeed)
 
 	return middleware.RequestID(
 		middleware.Logging(serviceName)(

@@ -12,6 +12,8 @@ import (
 	httptransport "social-networking-platform/feed-service/internal/transport/http"
 	redisrepo "social-networking-platform/feed-service/internal/repository/redis"
 	goredis "github.com/redis/go-redis/v9"
+	handlers "social-networking-platform/feed-service/internal/handler/http"
+	feedservice "social-networking-platform/feed-service/internal/service"
 )
 
 type App struct {
@@ -23,35 +25,50 @@ type App struct {
 }
 
 func NewApp(cfg config.Config) (*App, error) {
-	router := httptransport.NewRouter(cfg.ServiceName)
+
+	redisClient := goredis.NewClient(&goredis.Options{
+		Addr: "localhost:6379",
+	})
+
+	feedRepo := redisrepo.NewFeedRepository(redisClient)
+	feedService := feedservice.NewFeedService(feedRepo)
+	feedHandler := handlers.NewFeedHandler(feedService)
+	router := httptransport.NewRouter(
+		cfg.ServiceName,
+		feedHandler,
+	)
+
 	if router == nil {
 		return nil, fmt.Errorf("failed to initialize router")
 	}
+
 	cons, err := kafkarepo.NewFollowConsumer(cfg)
 	if err != nil {
 		return nil, err
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
-	redisClient := goredis.NewClient(&goredis.Options{
-	Addr: "localhost:6379",
-	})
-
-	feedRepo := redisrepo.NewFeedRepository(redisClient)
-
 	app := &App{
-	Router:   router,
-	cancel:   cancel,
-	follower: cons,
-	feedRepo: feedRepo,
+		Router:   router,
+		cancel:   cancel,
+		follower: cons,
+		feedRepo: feedRepo,
 	}
+
 	app.wg.Add(1)
+
 	go func() {
 		defer app.wg.Done()
+
 		if err := cons.Run(ctx); err != nil {
-			log.Printf("feed-service: user.followed consumer exited: %v", err)
+			log.Printf(
+				"feed-service: user.followed consumer exited: %v",
+				err,
+			)
 		}
 	}()
+
 	return app, nil
 }
 
