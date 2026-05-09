@@ -7,10 +7,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"unicode/utf8"
 
 	"social-networking-platform/posts-service/internal/domain"
+	postkafka "social-networking-platform/posts-service/internal/repository/kafka"
 	"social-networking-platform/posts-service/internal/repository/postgres"
 )
 
@@ -31,14 +33,19 @@ type PostService interface {
 }
 
 type postService struct {
-	repo  postgres.PostRepository
-	newID func() string
+	repo   postgres.PostRepository
+	events postkafka.PostProducer
+	newID  func() string
 }
 
-func NewPostService(repo postgres.PostRepository) PostService {
+func NewPostService(repo postgres.PostRepository, publisher postkafka.PostProducer) PostService {
+	if publisher == nil {
+		publisher = postkafka.NewStubPostProducer()
+	}
 	return &postService{
-		repo:  repo,
-		newID: newPostID,
+		repo:   repo,
+		events: publisher,
+		newID:  newPostID,
 	}
 }
 
@@ -57,6 +64,9 @@ func (s *postService) CreatePost(ctx context.Context, authorID string, content s
 
 	if err := s.repo.CreatePost(ctx, post); err != nil {
 		return nil, err
+	}
+	if err := s.events.PublishCreated(ctx, *post); err != nil {
+		log.Printf("posts-service: kafka publish post.created: %v", err)
 	}
 
 	return post, nil

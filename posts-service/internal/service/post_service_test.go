@@ -11,6 +11,23 @@ import (
 	"social-networking-platform/posts-service/internal/domain"
 )
 
+type mockPostProducer struct {
+	publishCreatedFunc func(ctx context.Context, post domain.Post) error
+	publishedPosts     []domain.Post
+	publishCallCount   int
+}
+
+func (m *mockPostProducer) PublishCreated(ctx context.Context, post domain.Post) error {
+	m.publishCallCount++
+	m.publishedPosts = append(m.publishedPosts, post)
+	if m.publishCreatedFunc != nil {
+		return m.publishCreatedFunc(ctx, post)
+	}
+	return nil
+}
+
+func (m *mockPostProducer) Close() error { return nil }
+
 type mockPostRepository struct {
 	createPostFunc       func(ctx context.Context, post *domain.Post) error
 	getPostByIDFunc      func(ctx context.Context, id string) (*domain.Post, error)
@@ -80,8 +97,10 @@ func TestCreatePost_PersistsGeneratedPost(t *testing.T) {
 			return nil
 		},
 	}
+	producer := &mockPostProducer{}
 	svc := &postService{
-		repo: repo,
+		repo:   repo,
+		events: producer,
 		newID: func() string {
 			return "post-1"
 		},
@@ -103,13 +122,21 @@ func TestCreatePost_PersistsGeneratedPost(t *testing.T) {
 	if repo.lastCreated.ID != "post-1" || repo.lastCreated.AuthorID != "author-1" || repo.lastCreated.Content != "hello world" {
 		t.Fatalf("unexpected repository payload: %+v", repo.lastCreated)
 	}
+	if producer.publishCallCount != 1 {
+		t.Fatalf("publishCallCount = %d, want 1", producer.publishCallCount)
+	}
+	if len(producer.publishedPosts) != 1 || producer.publishedPosts[0].ID != "post-1" {
+		t.Fatalf("unexpected published posts: %+v", producer.publishedPosts)
+	}
 }
 
 func TestCreatePost_ValidationErrorWhenContentBlank(t *testing.T) {
 	ctx := context.Background()
 	repo := &mockPostRepository{}
+	producer := &mockPostProducer{}
 	svc := &postService{
-		repo: repo,
+		repo:   repo,
+		events: producer,
 		newID: func() string {
 			return "post-1"
 		},
@@ -125,13 +152,18 @@ func TestCreatePost_ValidationErrorWhenContentBlank(t *testing.T) {
 	if repo.lastCreated != nil {
 		t.Fatalf("expected repository not to be called, got %+v", repo.lastCreated)
 	}
+	if producer.publishCallCount != 0 {
+		t.Fatalf("publishCallCount = %d, want 0", producer.publishCallCount)
+	}
 }
 
 func TestCreatePost_ValidationErrorWhenContentTooLong(t *testing.T) {
 	ctx := context.Background()
 	repo := &mockPostRepository{}
+	producer := &mockPostProducer{}
 	svc := &postService{
-		repo: repo,
+		repo:   repo,
+		events: producer,
 		newID: func() string {
 			return "post-1"
 		},
@@ -147,6 +179,71 @@ func TestCreatePost_ValidationErrorWhenContentTooLong(t *testing.T) {
 	if repo.lastCreated != nil {
 		t.Fatalf("expected repository not to be called, got %+v", repo.lastCreated)
 	}
+	if producer.publishCallCount != 0 {
+		t.Fatalf("publishCallCount = %d, want 0", producer.publishCallCount)
+	}
+}
+
+func TestCreatePost_DoesNotPublishWhenRepositoryFails(t *testing.T) {
+	ctx := context.Background()
+	repo := &mockPostRepository{
+		createPostFunc: func(ctx context.Context, post *domain.Post) error {
+			return errors.New("insert failed")
+		},
+	}
+	producer := &mockPostProducer{}
+	svc := &postService{
+		repo:   repo,
+		events: producer,
+		newID: func() string {
+			return "post-1"
+		},
+	}
+
+	post, err := svc.CreatePost(ctx, "author-1", "hello world")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if post != nil {
+		t.Fatalf("expected nil post, got %+v", post)
+	}
+	if producer.publishCallCount != 0 {
+		t.Fatalf("publishCallCount = %d, want 0", producer.publishCallCount)
+	}
+}
+
+func TestCreatePost_IgnoresPublishFailureAfterInsert(t *testing.T) {
+	ctx := context.Background()
+	repo := &mockPostRepository{
+		createPostFunc: func(ctx context.Context, post *domain.Post) error {
+			post.CreatedAt = time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+			post.UpdatedAt = post.CreatedAt
+			return nil
+		},
+	}
+	producer := &mockPostProducer{
+		publishCreatedFunc: func(ctx context.Context, post domain.Post) error {
+			return errors.New("publish failed")
+		},
+	}
+	svc := &postService{
+		repo:   repo,
+		events: producer,
+		newID: func() string {
+			return "post-1"
+		},
+	}
+
+	post, err := svc.CreatePost(ctx, "author-1", "hello world")
+	if err != nil {
+		t.Fatalf("CreatePost: %v", err)
+	}
+	if post == nil {
+		t.Fatal("expected post, got nil")
+	}
+	if producer.publishCallCount != 1 {
+		t.Fatalf("publishCallCount = %d, want 1", producer.publishCallCount)
+	}
 }
 
 func TestGetPost_DelegatesToRepository(t *testing.T) {
@@ -157,7 +254,7 @@ func TestGetPost_DelegatesToRepository(t *testing.T) {
 			return want, nil
 		},
 	}
-	svc := NewPostService(repo)
+	svc := NewPostService(repo, nil)
 
 	post, err := svc.GetPost(ctx, " post-1 ")
 	if err != nil {
@@ -179,7 +276,7 @@ func TestListPostsByAuthor_DelegatesToRepository(t *testing.T) {
 			return want, nil
 		},
 	}
-	svc := NewPostService(repo)
+	svc := NewPostService(repo, nil)
 
 	posts, err := svc.ListPostsByAuthor(ctx, " author-1 ")
 	if err != nil {
@@ -210,7 +307,7 @@ func TestUpdatePost_UpdatesOwnedPost(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewPostService(repo)
+	svc := NewPostService(repo, nil)
 
 	post, err := svc.UpdatePost(ctx, "author-1", "post-1", " edited ")
 	if err != nil {
@@ -234,7 +331,7 @@ func TestUpdatePost_RejectsNonOwner(t *testing.T) {
 			return &domain.Post{ID: "post-1", AuthorID: "author-2", Content: "old"}, nil
 		},
 	}
-	svc := NewPostService(repo)
+	svc := NewPostService(repo, nil)
 
 	post, err := svc.UpdatePost(ctx, "author-1", "post-1", "edited")
 	if !errors.Is(err, ErrForbidden) {
@@ -251,7 +348,7 @@ func TestUpdatePost_RejectsNonOwner(t *testing.T) {
 func TestUpdatePost_ValidationErrorWhenContentBlank(t *testing.T) {
 	ctx := context.Background()
 	repo := &mockPostRepository{}
-	svc := NewPostService(repo)
+	svc := NewPostService(repo, nil)
 
 	post, err := svc.UpdatePost(ctx, "author-1", "post-1", "   ")
 	if !errors.Is(err, ErrValidation) {
@@ -272,7 +369,7 @@ func TestUpdatePost_NotFound(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := NewPostService(repo)
+	svc := NewPostService(repo, nil)
 
 	post, err := svc.UpdatePost(ctx, "author-1", "missing", "edited")
 	if !errors.Is(err, ErrPostNotFound) {
@@ -293,7 +390,7 @@ func TestUpdatePost_MapsRepositoryNotFound(t *testing.T) {
 			return sql.ErrNoRows
 		},
 	}
-	svc := NewPostService(repo)
+	svc := NewPostService(repo, nil)
 
 	post, err := svc.UpdatePost(ctx, "author-1", "post-1", "edited")
 	if !errors.Is(err, ErrPostNotFound) {
@@ -311,7 +408,7 @@ func TestDeletePost_DeletesOwnedPost(t *testing.T) {
 			return &domain.Post{ID: "post-1", AuthorID: "author-1"}, nil
 		},
 	}
-	svc := NewPostService(repo)
+	svc := NewPostService(repo, nil)
 
 	if err := svc.DeletePost(ctx, "author-1", "post-1"); err != nil {
 		t.Fatalf("DeletePost: %v", err)
@@ -331,7 +428,7 @@ func TestDeletePost_RejectsNonOwner(t *testing.T) {
 			return &domain.Post{ID: "post-1", AuthorID: "author-2"}, nil
 		},
 	}
-	svc := NewPostService(repo)
+	svc := NewPostService(repo, nil)
 
 	err := svc.DeletePost(ctx, "author-1", "post-1")
 	if !errors.Is(err, ErrForbidden) {
@@ -349,7 +446,7 @@ func TestDeletePost_NotFound(t *testing.T) {
 			return nil, nil
 		},
 	}
-	svc := NewPostService(repo)
+	svc := NewPostService(repo, nil)
 
 	err := svc.DeletePost(ctx, "author-1", "missing")
 	if !errors.Is(err, ErrPostNotFound) {
@@ -367,7 +464,7 @@ func TestDeletePost_MapsRepositoryNotFound(t *testing.T) {
 			return sql.ErrNoRows
 		},
 	}
-	svc := NewPostService(repo)
+	svc := NewPostService(repo, nil)
 
 	err := svc.DeletePost(ctx, "author-1", "post-1")
 	if !errors.Is(err, ErrPostNotFound) {
