@@ -30,7 +30,7 @@ type App struct {
 func NewApp(cfg config.Config) (*App, error) {
 
 	redisClient := goredis.NewClient(&goredis.Options{
-		Addr: "localhost:6379",
+		Addr: fmt.Sprintf("%s:%s", cfg.RedisHost, cfg.RedisPort),
 	})
 
 	feedRepo := redisrepo.NewFeedRepository(redisClient)

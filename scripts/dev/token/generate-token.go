@@ -6,11 +6,15 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 )
 
 func main() {
-	secret := "secret"
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		secret = "change-me"
+	}
 	issuer := "auth-service"
 	subject := "google:123"
 	sessionID := "session-1"
