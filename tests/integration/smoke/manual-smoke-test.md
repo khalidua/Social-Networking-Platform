@@ -319,6 +319,68 @@ Expected:
 
 ---
 
+# 7) Kafka broker and topic exchange (Issue 8.3)
+
+## Start compose stack
+
+From project root:
+
+```powershell
+docker compose -f deploy/compose/compose.yml up -d
+```
+
+## Verify broker is reachable
+
+```powershell
+docker exec snp-kafka kafka-topics --bootstrap-server kafka:29092 --list
+```
+
+Expected:
+
+* command succeeds (topic list may be empty initially)
+
+## Produce and consume a test message on `user.followed`
+
+Terminal A (consumer):
+
+```powershell
+docker exec -it snp-kafka kafka-console-consumer --bootstrap-server kafka:29092 --topic user.followed --from-beginning --max-messages 1
+```
+
+Terminal B (producer):
+
+```powershell
+$msg = '{"follower_id":"u1","following_id":"u2","created_at":"2026-01-01T00:00:00Z"}'
+$msg | docker exec -i snp-kafka kafka-console-producer --bootstrap-server kafka:29092 --topic user.followed
+```
+
+Expected:
+
+* Terminal A prints exactly 1 message and exits.
+
+## Service-level producer/consumer exchange check
+
+1. Ensure `users-service` is configured with:
+   * `KAFKA_BROKERS=kafka:29092`
+   * `KAFKA_TOPIC_USER_FOLLOWED=user.followed`
+2. Ensure `feed-service` and `notification-service` are configured with:
+   * `KAFKA_BROKERS=kafka:29092`
+   * `KAFKA_TOPIC_USER_FOLLOWED=user.followed`
+3. Trigger a follow event via `users-service` API (`POST /api/v1/users/{id}/follow`).
+4. Check logs:
+
+```powershell
+docker logs snp-feed-service --tail 100
+docker logs snp-notification-service --tail 100
+```
+
+Expected:
+
+* `users-service` publishes event to `user.followed`.
+* `feed-service` and/or `notification-service` consumer logs indicate the event was consumed.
+
+---
+
 # 4) Posts Service manual test
 
 ## Terminal 1
