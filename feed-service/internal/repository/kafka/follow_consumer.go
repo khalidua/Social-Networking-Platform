@@ -101,12 +101,29 @@ func (c *kafkaFollowConsumer) Run(ctx context.Context) error {
 			}
 			continue
 		}
-		log.Printf("%s: follower_id=%q followee_id=%q partition=%d offset=%d",
-			c.prefix, ev.FollowerID, ev.FolloweeID, m.Partition, m.Offset)
+		if err := c.handleFollowed(ctx, ev); err != nil {
+			log.Printf("%s: handle follow err=%v", c.prefix, err)
+		}
+
 		if err := c.r.CommitMessages(ctx, m); err != nil && !errors.Is(err, context.Canceled) {
 			return err
 		}
 	}
+}
+
+func (c *kafkaFollowConsumer) handleFollowed(
+	ctx context.Context,
+	ev UserFollowedV1,
+) error {
+
+	log.Printf(
+		"%s: reconcile follow follower=%q followee=%q policy=future-posts-only",
+		c.prefix,
+		ev.FollowerID,
+		ev.FolloweeID,
+	)
+
+	return nil
 }
 
 func (c *kafkaFollowConsumer) Close() error {
