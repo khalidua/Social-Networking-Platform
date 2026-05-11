@@ -42,16 +42,23 @@ This document defines message contracts, producer ownership, consumer expectatio
   - ids are non-empty strings
   - `created_at` is epoch millis and used for feed ordering.
 
-## `post.interacted` (v1, reserved)
+## `post.interacted` (v1)
 
 - Topic default: `post.interacted`
 - Contract: `docs/schemas/post-interacted-v1.json`
-- Producer owner: reserved for interaction-producing service(s)
-- Intended consumer:
-  - `notification-service` (topic config present)
-- Current status:
-  - contract documented and versioned
-  - producer and runtime consumer flow not yet implemented in this phase.
+- Producer owner: `posts-service`
+- Payload fields:
+  - `post_id` (string)
+  - `post_author_id` (string)
+  - `actor_id` (string)
+  - `interaction_type` (string, current supported value: `like`)
+  - `created_at` (int64 unix milliseconds)
+- Current consumer:
+  - `notification-service` (`PostInteractedV1`)
+- Consumer expectation:
+  - ids are non-empty strings
+  - self-interactions are ignored by the notification consumer
+  - unsupported interaction types are rejected and sent to the topic DLQ after retry.
 
 ## Implementation Source of Truth
 
@@ -62,3 +69,4 @@ This document defines message contracts, producer ownership, consumer expectatio
   - `feed-service/internal/repository/kafka/follow_consumer.go`
   - `feed-service/internal/repository/kafka/post_consumer.go`
   - `notification-service/internal/repository/kafka/follow_consumer.go`
+  - `notification-service/internal/repository/kafka/interacion_consumer.go`

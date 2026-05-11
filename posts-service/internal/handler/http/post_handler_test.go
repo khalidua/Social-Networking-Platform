@@ -21,6 +21,7 @@ type mockPostService struct {
 	listPostsByAuthorFunc func(ctx context.Context, authorID string) ([]domain.Post, error)
 	updatePostFunc        func(ctx context.Context, requesterID string, postID string, content string) (*domain.Post, error)
 	deletePostFunc        func(ctx context.Context, requesterID string, postID string) error
+	interactWithPostFunc  func(ctx context.Context, actorID string, postID string, interactionType string) (*domain.PostInteraction, error)
 }
 
 func (m *mockPostService) CreatePost(ctx context.Context, authorID string, content string) (*domain.Post, error) {
@@ -56,6 +57,13 @@ func (m *mockPostService) DeletePost(ctx context.Context, requesterID string, po
 		return m.deletePostFunc(ctx, requesterID, postID)
 	}
 	return nil
+}
+
+func (m *mockPostService) InteractWithPost(ctx context.Context, actorID string, postID string, interactionType string) (*domain.PostInteraction, error) {
+	if m.interactWithPostFunc != nil {
+		return m.interactWithPostFunc(ctx, actorID, postID, interactionType)
+	}
+	return nil, nil
 }
 
 func requestContextWithIDs() context.Context {
@@ -247,5 +255,54 @@ func TestDeletePost_NotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d body=%s", w.Code, http.StatusNotFound, w.Body.String())
+	}
+}
+
+func TestInteractWithPost_Accepted(t *testing.T) {
+	h := NewPostHandler(&mockPostService{
+		interactWithPostFunc: func(ctx context.Context, actorID string, postID string, interactionType string) (*domain.PostInteraction, error) {
+			if actorID != "user-1" || postID != "post-1" || interactionType != "like" {
+				t.Fatalf("unexpected interaction args: actorID=%q postID=%q interactionType=%q", actorID, postID, interactionType)
+			}
+			return &domain.PostInteraction{
+				PostID:          postID,
+				PostAuthorID:    "author-1",
+				ActorID:         actorID,
+				InteractionType: interactionType,
+			}, nil
+		},
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/posts/post-1/interactions", strings.NewReader(`{"interaction_type":"like"}`))
+	r = r.WithContext(requestContextWithIDs())
+
+	h.InteractWithPost(w, r)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d body=%s", w.Code, http.StatusAccepted, w.Body.String())
+	}
+	var body apiresponse.SuccessEnvelope
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if !body.Success {
+		t.Fatal("expected success envelope")
+	}
+}
+
+func TestInteractWithPost_ForbiddenSelfInteraction(t *testing.T) {
+	h := NewPostHandler(&mockPostService{
+		interactWithPostFunc: func(ctx context.Context, actorID string, postID string, interactionType string) (*domain.PostInteraction, error) {
+			return nil, service.ErrForbidden
+		},
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/posts/post-1/interactions", strings.NewReader(`{"interaction_type":"like"}`))
+	r = r.WithContext(requestContextWithIDs())
+
+	h.InteractWithPost(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d body=%s", w.Code, http.StatusForbidden, w.Body.String())
 	}
 }

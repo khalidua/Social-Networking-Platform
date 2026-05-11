@@ -138,6 +138,22 @@ components:
           type: string
           format: date-time
 
+    PostInteraction:
+      type: object
+      properties:
+        postId:
+          type: string
+        postAuthorId:
+          type: string
+        actorId:
+          type: string
+        interactionType:
+          type: string
+          example: like
+        createdAt:
+          type: integer
+          format: int64
+
     Notification:
       type: object
       properties:
@@ -145,10 +161,16 @@ components:
           type: string
         userId:
           type: string
+        type:
+          type: string
+          example: follow
         message:
           type: string
         read:
           type: boolean
+        createdAt:
+          type: string
+          format: date-time
 
 paths:
   /health:
@@ -535,6 +557,78 @@ paths:
         '200':
           description: Post deleted
 
+  /api/v1/posts/{id}/interactions:
+    post:
+      tags: [Posts]
+      summary: Interact with a post
+      description: Creates a supported post interaction event. Current supported interaction type is `like`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: X-User-ID
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Auth subject forwarded by gateway.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                interaction_type:
+                  type: string
+                  example: like
+      responses:
+        '202':
+          description: Interaction accepted and event publish attempted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PostInteraction'
+        '400':
+          description: Invalid post id or unsupported interaction type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          description: Missing authenticated user identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Post authors cannot interact with their own post
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Post not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
   /api/v1/feed:
     get:
       tags: [Feed]
@@ -555,14 +649,39 @@ paths:
     get:
       tags: [Notifications]
       summary: Get user notifications
+      description: Requires `X-User-ID` on the upstream notification-service request (injected by the API gateway).
       security:
         - bearerAuth: []
+      parameters:
+        - name: X-User-ID
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Auth subject forwarded by gateway (not usually set manually by SPA clients hitting the gateway).
       responses:
         '200':
           description: Notifications list
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Notification'
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Notification'
+        '401':
+          description: Missing authentication or gateway-forwarded user identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Persistence or internal failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'

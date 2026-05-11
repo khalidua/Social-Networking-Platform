@@ -2,6 +2,7 @@ package httptransport
 
 import (
 	"net/http"
+	"strings"
 
 	"social-networking-platform/posts-service/internal/apiresponse"
 	"social-networking-platform/posts-service/internal/apperrors"
@@ -27,6 +28,14 @@ func NewRouter(serviceName string, postHandler *handlers.PostHandler) http.Handl
 		}
 	})
 	mux.HandleFunc("/api/v1/posts/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/interactions") {
+			if r.Method != http.MethodPost {
+				methodNotAllowed(w, r)
+				return
+			}
+			postHandler.InteractWithPost(w, r)
+			return
+		}
 		switch r.Method {
 		case http.MethodGet:
 			postHandler.GetPost(w, r)

@@ -2,15 +2,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.local/schemas/post-interacted-v1.json",
   "title": "post.interacted v1",
-  "description": "Reserved event contract for interaction-driven notifications. Topic default is post.interacted.",
+  "description": "Event contract for interaction-driven notifications. Topic default is post.interacted.",
   "type": "object",
-  "required": ["post_id", "actor_id", "interaction_type", "created_at"],
+  "required": ["post_id", "post_author_id", "actor_id", "interaction_type", "created_at"],
   "additionalProperties": false,
   "properties": {
     "post_id": {
       "type": "string",
       "minLength": 1,
       "description": "Unique post identifier."
+    },
+    "post_author_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "User id of the post author who should receive the notification."
     },
     "actor_id": {
       "type": "string",
@@ -20,7 +25,7 @@
     "interaction_type": {
       "type": "string",
       "minLength": 1,
-      "description": "Interaction kind, e.g. like/comment/repost."
+      "description": "Interaction kind. Current producer supports like."
     },
     "created_at": {
       "type": "integer",

@@ -27,9 +27,9 @@ Reference: `deploy/compose/compose.yml`
   - Purpose: fan-out post IDs into follower home feeds.
 
 - `post.interacted`
-  - Producer: reserved/not yet implemented in current phase
-  - Consumer: `notification-service` (topic config already present)
-  - Purpose: future notification triggers for reactions/interactions.
+  - Producer: `posts-service`
+  - Consumer: `notification-service`
+  - Purpose: create notifications for supported post interactions, currently post likes.
 
 ## Topic Configuration via Environment Variables
 

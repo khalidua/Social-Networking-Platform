@@ -65,7 +65,7 @@ func NewApp(cfg config.Config) (*App, error) {
 	postRepo := postgres.NewSQLPostRepository(db)
 
 	var publisher postkafka.PostProducer
-	kp, kerr := postkafka.NewKafkaPostProducer(cfg.KafkaBrokers, cfg.KafkaTopicPostCreated)
+	kp, kerr := postkafka.NewKafkaPostProducer(cfg.KafkaBrokers, cfg.KafkaTopicPostCreated, cfg.KafkaTopicPostInteracted)
 	if kerr != nil {
 		log.Printf("posts-service: Kafka post producer disabled (%v); set KAFKA_BROKERS to enable events", kerr)
 		publisher = postkafka.NewStubPostProducer()

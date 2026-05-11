@@ -24,6 +24,10 @@ type updatePostBody struct {
 	Content string `json:"content"`
 }
 
+type interactPostBody struct {
+	InteractionType string `json:"interaction_type"`
+}
+
 func NewPostHandler(svc service.PostService) *PostHandler {
 	return &PostHandler{svc: svc}
 }
@@ -162,6 +166,46 @@ func (h *PostHandler) DeletePost(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *PostHandler) InteractWithPost(w http.ResponseWriter, r *http.Request) {
+	rid := middleware.GetRequestID(r.Context())
+	userID := middleware.GetAuthenticatedUserID(r.Context())
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, rid, apperrors.CodeUnauthenticated, "missing authenticated user")
+		return
+	}
+
+	postID, ok := postIDFromInteractionPath(r.URL.Path)
+	if !ok {
+		writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "invalid post interaction path")
+		return
+	}
+
+	body := interactPostBody{InteractionType: "like"}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, rid, apperrors.CodeBadRequest, "invalid JSON body")
+			return
+		}
+	}
+
+	interaction, err := h.svc.InteractWithPost(r.Context(), userID, postID, body.InteractionType)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrValidation):
+			writeError(w, http.StatusBadRequest, rid, apperrors.CodeValidationError, err.Error())
+		case errors.Is(err, service.ErrForbidden):
+			writeError(w, http.StatusForbidden, rid, apperrors.CodeForbidden, err.Error())
+		case errors.Is(err, service.ErrPostNotFound):
+			writeError(w, http.StatusNotFound, rid, apperrors.CodeNotFound, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, rid, apperrors.CodeInternalError, err.Error())
+		}
+		return
+	}
+
+	writeSuccess(w, http.StatusAccepted, rid, interaction, "")
+}
+
 func postIDFromPath(path string) (string, bool) {
 	const prefix = "/api/v1/posts/"
 	if !strings.HasPrefix(path, prefix) {
@@ -172,6 +216,14 @@ func postIDFromPath(path string) (string, bool) {
 		return "", false
 	}
 	return rest, true
+}
+
+func postIDFromInteractionPath(path string) (string, bool) {
+	const suffix = "/interactions"
+	if !strings.HasSuffix(path, suffix) {
+		return "", false
+	}
+	return postIDFromPath(strings.TrimSuffix(path, suffix))
 }
 
 func writeSuccess(w http.ResponseWriter, status int, requestID string, data interface{}, message string) {

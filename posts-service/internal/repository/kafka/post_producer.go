@@ -15,6 +15,7 @@ import (
 // PostProducer emits post.created for feed-service consumption.
 type PostProducer interface {
 	PublishCreated(ctx context.Context, post domain.Post) error
+	PublishInteracted(ctx context.Context, interaction domain.PostInteraction) error
 	Close() error
 }
 
@@ -28,10 +29,15 @@ func (p *StubPostProducer) PublishCreated(ctx context.Context, post domain.Post)
 	return nil
 }
 
+func (p *StubPostProducer) PublishInteracted(ctx context.Context, interaction domain.PostInteraction) error {
+	return nil
+}
+
 func (p *StubPostProducer) Close() error { return nil }
 
 type KafkaPostProducer struct {
-	w *kafkago.Writer
+	createdWriter    *kafkago.Writer
+	interactedWriter *kafkago.Writer
 }
 
 // postCreatedFeedV1 matches feed-service/internal/repository/kafka/post_consumer.go.
@@ -40,6 +46,14 @@ type postCreatedFeedV1 struct {
 	AuthorID  string `json:"author_id"`
 	Content   string `json:"content"`
 	CreatedAt int64  `json:"created_at"`
+}
+
+type postInteractedV1 struct {
+	PostID          string `json:"post_id"`
+	PostAuthorID    string `json:"post_author_id"`
+	ActorID         string `json:"actor_id"`
+	InteractionType string `json:"interaction_type"`
+	CreatedAt       int64  `json:"created_at"`
 }
 
 func parseBrokers(raw string) []string {
@@ -58,24 +72,30 @@ func parseBrokers(raw string) []string {
 	return out
 }
 
-func NewKafkaPostProducer(brokersCSV string, topic string) (*KafkaPostProducer, error) {
+func NewKafkaPostProducer(brokersCSV string, postCreatedTopic string, postInteractedTopic string) (*KafkaPostProducer, error) {
 	brokers := parseBrokers(brokersCSV)
-	if len(brokers) == 0 || strings.TrimSpace(topic) == "" {
-		return nil, errors.New("kafka brokers and topic are required")
+	if len(brokers) == 0 || strings.TrimSpace(postCreatedTopic) == "" || strings.TrimSpace(postInteractedTopic) == "" {
+		return nil, errors.New("kafka brokers and topics are required")
 	}
 
-	w := &kafkago.Writer{
+	createdWriter := &kafkago.Writer{
 		Addr:                   kafkago.TCP(brokers...),
-		Topic:                  topic,
+		Topic:                  postCreatedTopic,
+		Balancer:               &kafkago.LeastBytes{},
+		AllowAutoTopicCreation: true,
+	}
+	interactedWriter := &kafkago.Writer{
+		Addr:                   kafkago.TCP(brokers...),
+		Topic:                  postInteractedTopic,
 		Balancer:               &kafkago.LeastBytes{},
 		AllowAutoTopicCreation: true,
 	}
 
-	return &KafkaPostProducer{w: w}, nil
+	return &KafkaPostProducer{createdWriter: createdWriter, interactedWriter: interactedWriter}, nil
 }
 
 func (p *KafkaPostProducer) PublishCreated(ctx context.Context, post domain.Post) error {
-	if p == nil || p.w == nil {
+	if p == nil || p.createdWriter == nil {
 		return errors.New("kafka writer not initialized")
 	}
 
@@ -94,15 +114,50 @@ func (p *KafkaPostProducer) PublishCreated(ctx context.Context, post domain.Post
 		return err
 	}
 
-	return p.w.WriteMessages(ctx, kafkago.Message{
+	return p.createdWriter.WriteMessages(ctx, kafkago.Message{
 		Key:   []byte(post.AuthorID),
 		Value: body,
 	})
 }
 
+func (p *KafkaPostProducer) PublishInteracted(ctx context.Context, interaction domain.PostInteraction) error {
+	if p == nil || p.interactedWriter == nil {
+		return errors.New("kafka writer not initialized")
+	}
+
+	ts := interaction.CreatedAt
+	if ts == 0 {
+		ts = time.Now().UnixMilli()
+	}
+
+	body, err := json.Marshal(postInteractedV1{
+		PostID:          interaction.PostID,
+		PostAuthorID:    interaction.PostAuthorID,
+		ActorID:         interaction.ActorID,
+		InteractionType: interaction.InteractionType,
+		CreatedAt:       ts,
+	})
+	if err != nil {
+		return err
+	}
+
+	return p.interactedWriter.WriteMessages(ctx, kafkago.Message{
+		Key:   []byte(interaction.PostID),
+		Value: body,
+	})
+}
+
 func (p *KafkaPostProducer) Close() error {
-	if p == nil || p.w == nil {
+	if p == nil {
 		return nil
 	}
-	return p.w.Close()
+	if p.createdWriter != nil {
+		if err := p.createdWriter.Close(); err != nil {
+			return err
+		}
+	}
+	if p.interactedWriter != nil {
+		return p.interactedWriter.Close()
+	}
+	return nil
 }

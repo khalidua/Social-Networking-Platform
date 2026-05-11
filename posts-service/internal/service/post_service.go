@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"social-networking-platform/posts-service/internal/domain"
@@ -30,6 +31,7 @@ type PostService interface {
 	ListPostsByAuthor(ctx context.Context, authorID string) ([]domain.Post, error)
 	UpdatePost(ctx context.Context, requesterID string, postID string, content string) (*domain.Post, error)
 	DeletePost(ctx context.Context, requesterID string, postID string) error
+	InteractWithPost(ctx context.Context, actorID string, postID string, interactionType string) (*domain.PostInteraction, error)
 }
 
 type postService struct {
@@ -131,6 +133,49 @@ func (s *postService) DeletePost(ctx context.Context, requesterID string, postID
 	return nil
 }
 
+func (s *postService) InteractWithPost(ctx context.Context, actorID string, postID string, interactionType string) (*domain.PostInteraction, error) {
+	trimmedActorID := strings.TrimSpace(actorID)
+	trimmedPostID := strings.TrimSpace(postID)
+	trimmedType := strings.TrimSpace(strings.ToLower(interactionType))
+	if trimmedActorID == "" || trimmedPostID == "" {
+		return nil, ErrValidation
+	}
+	if trimmedType == "" {
+		trimmedType = "like"
+	}
+	if trimmedType != "like" {
+		return nil, validation("interaction_type must be like")
+	}
+
+	post, err := s.repo.GetPostByID(ctx, trimmedPostID)
+	if err != nil {
+		return nil, err
+	}
+	if post == nil {
+		return nil, ErrPostNotFound
+	}
+	if post.AuthorID == trimmedActorID {
+		return nil, ErrForbidden
+	}
+
+	interaction := domain.PostInteraction{
+		PostID:          post.ID,
+		PostAuthorID:    post.AuthorID,
+		ActorID:         trimmedActorID,
+		InteractionType: trimmedType,
+		CreatedAt:       timeNowMillis(),
+	}
+	if err := s.events.PublishInteracted(ctx, interaction); err != nil {
+		log.Printf("posts-service: kafka publish post.interacted: %v", err)
+	}
+
+	return &interaction, nil
+}
+
+var timeNowMillis = func() int64 {
+	return time.Now().UnixMilli()
+}
+
 func newPostID() string {
 	var buf [16]byte
 	if _, err := rand.Read(buf[:]); err != nil {
@@ -177,4 +222,8 @@ func (s *StubPostService) UpdatePost(ctx context.Context, requesterID string, po
 
 func (s *StubPostService) DeletePost(ctx context.Context, requesterID string, postID string) error {
 	return nil
+}
+
+func (s *StubPostService) InteractWithPost(ctx context.Context, actorID string, postID string, interactionType string) (*domain.PostInteraction, error) {
+	return nil, nil
 }

@@ -12,9 +12,12 @@ import (
 )
 
 type mockPostProducer struct {
-	publishCreatedFunc func(ctx context.Context, post domain.Post) error
-	publishedPosts     []domain.Post
-	publishCallCount   int
+	publishCreatedFunc    func(ctx context.Context, post domain.Post) error
+	publishInteractedFunc func(ctx context.Context, interaction domain.PostInteraction) error
+	publishedPosts        []domain.Post
+	publishedInteractions []domain.PostInteraction
+	publishCallCount      int
+	interactionCallCount  int
 }
 
 func (m *mockPostProducer) PublishCreated(ctx context.Context, post domain.Post) error {
@@ -22,6 +25,15 @@ func (m *mockPostProducer) PublishCreated(ctx context.Context, post domain.Post)
 	m.publishedPosts = append(m.publishedPosts, post)
 	if m.publishCreatedFunc != nil {
 		return m.publishCreatedFunc(ctx, post)
+	}
+	return nil
+}
+
+func (m *mockPostProducer) PublishInteracted(ctx context.Context, interaction domain.PostInteraction) error {
+	m.interactionCallCount++
+	m.publishedInteractions = append(m.publishedInteractions, interaction)
+	if m.publishInteractedFunc != nil {
+		return m.publishInteractedFunc(ctx, interaction)
 	}
 	return nil
 }
@@ -469,5 +481,72 @@ func TestDeletePost_MapsRepositoryNotFound(t *testing.T) {
 	err := svc.DeletePost(ctx, "author-1", "post-1")
 	if !errors.Is(err, ErrPostNotFound) {
 		t.Fatalf("DeletePost error = %v, want %v", err, ErrPostNotFound)
+	}
+}
+
+func TestInteractWithPostPublishesLike(t *testing.T) {
+	ctx := context.Background()
+	repo := &mockPostRepository{
+		getPostByIDFunc: func(ctx context.Context, id string) (*domain.Post, error) {
+			return &domain.Post{ID: "post-1", AuthorID: "author-1"}, nil
+		},
+	}
+	producer := &mockPostProducer{}
+	svc := &postService{
+		repo:   repo,
+		events: producer,
+		newID:  func() string { return "post-1" },
+	}
+	oldNow := timeNowMillis
+	timeNowMillis = func() int64 { return 1234 }
+	defer func() { timeNowMillis = oldNow }()
+
+	interaction, err := svc.InteractWithPost(ctx, " actor-1 ", " post-1 ", "like")
+	if err != nil {
+		t.Fatalf("InteractWithPost: %v", err)
+	}
+	if interaction.PostAuthorID != "author-1" || interaction.ActorID != "actor-1" || interaction.CreatedAt != 1234 {
+		t.Fatalf("unexpected interaction: %+v", interaction)
+	}
+	if producer.interactionCallCount != 1 {
+		t.Fatalf("interactionCallCount = %d, want 1", producer.interactionCallCount)
+	}
+	if len(producer.publishedInteractions) != 1 || producer.publishedInteractions[0].PostID != "post-1" {
+		t.Fatalf("unexpected published interactions: %+v", producer.publishedInteractions)
+	}
+}
+
+func TestInteractWithPostRejectsSelfInteraction(t *testing.T) {
+	ctx := context.Background()
+	repo := &mockPostRepository{
+		getPostByIDFunc: func(ctx context.Context, id string) (*domain.Post, error) {
+			return &domain.Post{ID: "post-1", AuthorID: "author-1"}, nil
+		},
+	}
+	producer := &mockPostProducer{}
+	svc := NewPostService(repo, producer)
+
+	interaction, err := svc.InteractWithPost(ctx, "author-1", "post-1", "like")
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("InteractWithPost error = %v, want %v", err, ErrForbidden)
+	}
+	if interaction != nil {
+		t.Fatalf("expected nil interaction, got %+v", interaction)
+	}
+	if producer.interactionCallCount != 0 {
+		t.Fatalf("interactionCallCount = %d, want 0", producer.interactionCallCount)
+	}
+}
+
+func TestInteractWithPostRejectsUnsupportedType(t *testing.T) {
+	ctx := context.Background()
+	svc := NewPostService(&mockPostRepository{}, &mockPostProducer{})
+
+	interaction, err := svc.InteractWithPost(ctx, "actor-1", "post-1", "share")
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("InteractWithPost error = %v, want %v", err, ErrValidation)
+	}
+	if interaction != nil {
+		t.Fatalf("expected nil interaction, got %+v", interaction)
 	}
 }

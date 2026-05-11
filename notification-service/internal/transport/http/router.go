@@ -5,13 +5,14 @@ import (
 
 	handlers "social-networking-platform/notification-service/internal/handler/http"
 	"social-networking-platform/notification-service/internal/middleware"
+	"social-networking-platform/notification-service/internal/service"
 )
 
-func NewRouter(serviceName string) http.Handler {
+func NewRouter(serviceName string, notificationService service.NotificationService) http.Handler {
 	mux := http.NewServeMux()
 
 	healthHandler := handlers.NewHealthHandler(serviceName)
-	featureHandler := handlers.NewNotificationHandler()
+	featureHandler := handlers.NewNotificationHandler(notificationService)
 
 	mux.HandleFunc("/health", healthHandler.Health)
 

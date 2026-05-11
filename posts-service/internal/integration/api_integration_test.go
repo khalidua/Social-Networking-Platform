@@ -19,11 +19,17 @@ import (
 )
 
 type recordPostProducer struct {
-	events []domain.Post
+	events       []domain.Post
+	interactions []domain.PostInteraction
 }
 
 func (p *recordPostProducer) PublishCreated(ctx context.Context, post domain.Post) error {
 	p.events = append(p.events, post)
+	return nil
+}
+
+func (p *recordPostProducer) PublishInteracted(ctx context.Context, interaction domain.PostInteraction) error {
+	p.interactions = append(p.interactions, interaction)
 	return nil
 }
 
@@ -166,6 +172,22 @@ func TestIntegration_PostLifecycleAndPublish(t *testing.T) {
 	}
 	if len(producer.events) != 1 {
 		t.Fatalf("expected create event to publish only once, got %d", len(producer.events))
+	}
+
+	rec = httptest.NewRecorder()
+	r = request(http.MethodPost, "/api/v1/posts/"+created.ID+"/interactions", `{"interaction_type":"like"}`, "user:bob")
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("Interact expected 202 got %d %s", rec.Code, rec.Body.String())
+	}
+	if len(producer.interactions) != 1 {
+		t.Fatalf("expected 1 published interaction, got %d", len(producer.interactions))
+	}
+	if producer.interactions[0].PostID != created.ID ||
+		producer.interactions[0].PostAuthorID != "user:alice" ||
+		producer.interactions[0].ActorID != "user:bob" ||
+		producer.interactions[0].InteractionType != "like" {
+		t.Fatalf("unexpected published interaction: %+v", producer.interactions[0])
 	}
 
 	rec = httptest.NewRecorder()

@@ -187,6 +187,7 @@ services:
       DB_SSLMODE: disable
       KAFKA_BROKERS: kafka:29092
       KAFKA_TOPIC_POST_CREATED: post.created
+      KAFKA_TOPIC_POST_INTERACTED: post.interacted
     ports:
       - "8083:8083"
     networks:

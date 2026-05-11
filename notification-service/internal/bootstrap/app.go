@@ -12,6 +12,8 @@ import (
 
 	"social-networking-platform/notification-service/internal/config"
 	kafkarepo "social-networking-platform/notification-service/internal/repository/kafka"
+	postgresrepo "social-networking-platform/notification-service/internal/repository/postgres"
+	"social-networking-platform/notification-service/internal/service"
 	httptransport "social-networking-platform/notification-service/internal/transport/http"
 )
 
@@ -20,6 +22,7 @@ type App struct {
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	follower kafkarepo.FollowConsumer
+	interact kafkarepo.InteractionConsumer
 	db       *sql.DB
 }
 
@@ -47,13 +50,21 @@ func NewApp(cfg config.Config) (*App, error) {
 		return nil, err
 	}
 
-	router := httptransport.NewRouter(cfg.ServiceName)
+	notificationRepository := postgresrepo.NewSQLNotificationRepository(db)
+	notificationService := service.NewService(notificationRepository)
+	router := httptransport.NewRouter(cfg.ServiceName, notificationService)
 	if router == nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to initialize router")
 	}
-	cons, err := kafkarepo.NewFollowConsumer(cfg)
+	followConsumer, err := kafkarepo.NewFollowConsumer(cfg, notificationService)
 	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	interactionConsumer, err := kafkarepo.NewInteractionConsumer(cfg, notificationService)
+	if err != nil {
+		_ = followConsumer.Close()
 		_ = db.Close()
 		return nil, err
 	}
@@ -61,14 +72,22 @@ func NewApp(cfg config.Config) (*App, error) {
 	app := &App{
 		Router:   router,
 		cancel:   cancel,
-		follower: cons,
+		follower: followConsumer,
+		interact: interactionConsumer,
 		db:       db,
 	}
 	app.wg.Add(1)
 	go func() {
 		defer app.wg.Done()
-		if err := cons.Run(ctx); err != nil {
+		if err := followConsumer.Run(ctx); err != nil {
 			log.Printf("notification-service: user.followed consumer exited: %v", err)
+		}
+	}()
+	app.wg.Add(1)
+	go func() {
+		defer app.wg.Done()
+		if err := interactionConsumer.Run(ctx); err != nil {
+			log.Printf("notification-service: post.interacted consumer exited: %v", err)
 		}
 	}()
 	return app, nil
@@ -81,6 +100,11 @@ func (a *App) Close() error {
 	a.wg.Wait()
 	if a.follower != nil {
 		if err := a.follower.Close(); err != nil {
+			return err
+		}
+	}
+	if a.interact != nil {
+		if err := a.interact.Close(); err != nil {
 			return err
 		}
 	}

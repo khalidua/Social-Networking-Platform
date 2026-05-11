@@ -30,8 +30,9 @@ type Config struct {
 
 	MigrationsDir string
 
-	KafkaBrokers          string
-	KafkaTopicPostCreated string
+	KafkaBrokers             string
+	KafkaTopicPostCreated    string
+	KafkaTopicPostInteracted string
 }
 
 func Load() Config {
@@ -56,6 +57,7 @@ func Load() Config {
 	cfg.MigrationsDir = getEnv("MIGRATIONS_DIR", "migrations")
 	cfg.KafkaBrokers = strings.TrimSpace(getEnv("KAFKA_BROKERS", ""))
 	cfg.KafkaTopicPostCreated = getEnv("KAFKA_TOPIC_POST_CREATED", "post.created")
+	cfg.KafkaTopicPostInteracted = getEnv("KAFKA_TOPIC_POST_INTERACTED", "post.interacted")
 
 	validate(cfg)
 	return cfg
