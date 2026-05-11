@@ -27,6 +27,7 @@ type Config struct {
 	DBUser                   string
 	DBPassword               string
 	DBSSLMode                string
+	MigrationsDir            string
 	KafkaBrokers             string
 	KafkaTopicFollowed       string
 	KafkaTopicPostInteracted string
@@ -51,6 +52,7 @@ func Load() Config {
 	cfg.DBUser = getEnv("DB_USER", "postgres")
 	cfg.DBPassword = getEnv("DB_PASSWORD", "postgres")
 	cfg.DBSSLMode = getEnv("DB_SSLMODE", "disable")
+	cfg.MigrationsDir = getEnv("MIGRATIONS_DIR", "migrations")
 	cfg.KafkaBrokers = strings.TrimSpace(getEnv("KAFKA_BROKERS", ""))
 	cfg.KafkaTopicFollowed = getEnv("KAFKA_TOPIC_USER_FOLLOWED", "user.followed")
 	cfg.KafkaTopicPostInteracted = getEnv("KAFKA_TOPIC_POST_INTERACTED", "post.interacted")
