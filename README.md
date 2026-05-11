@@ -30,6 +30,11 @@ The system follows a microservices architecture with:
 - `deploy/` Docker, Compose, K8s, monitoring, logging assets
 - `tests/` integration, contract, and load testing
 
+## Key Design Notes
+- `docs/architecture/sharding-and-scaling-considerations.md` sharding/partitioning rationale and phase scope
+- `docs/messaging/event-contracts.md` versioned event ownership and payload expectations
+- `docs/messaging/kafka-topics.md` broker/topic setup and local verification
+
 ## Run a service
 From any service folder:
 
