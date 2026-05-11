@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/post-created-v1.json",
+  "title": "post.created v1",
+  "description": "Emitted by posts-service to KAFKA_TOPIC_POST_CREATED (default post.created) after a post is persisted.",
+  "type": "object",
+  "required": ["post_id", "author_id", "content", "created_at"],
+  "additionalProperties": false,
+  "properties": {
+    "post_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique post identifier."
+    },
+    "author_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Auth subject / user id of post author."
+    },
+    "content": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Post content snapshot at creation."
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unix epoch milliseconds when event was created."
+    }
+  }
+}

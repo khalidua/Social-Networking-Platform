@@ -54,3 +54,10 @@ Use the smoke test section in `tests/integration/smoke/manual-smoke-test.md`:
 - Verify broker readiness.
 - Produce and consume sample events on configured topics.
 - Verify service-level producer/consumer exchange.
+
+## Related Contract Docs
+
+- `docs/messaging/event-contracts.md`
+- `docs/schemas/user-followed-v1.json`
+- `docs/schemas/post-created-v1.json`
+- `docs/schemas/post-interacted-v1.json`
