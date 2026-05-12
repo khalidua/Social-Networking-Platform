@@ -18,6 +18,8 @@ The Go services already write one-line structured JSON logs to stdout. Promtail 
 - `service`
 - `request_id`
 - `correlation_id`
+- `trace_id`
+- `span_id`
 - `method`
 - `path`
 - `route_group`
@@ -37,7 +39,7 @@ Only low-cardinality fields are promoted to Loki labels:
 - `status_group`
 - `upstream_service`
 
-Do not label `request_id`, `correlation_id`, raw `path`, user ids, emails, session ids, or tokens.
+Do not label `request_id`, `correlation_id`, `trace_id`, `span_id`, raw `path`, user ids, emails, session ids, or tokens.
 
 ## Local URLs
 
@@ -70,4 +72,11 @@ For request-level debugging, search by request id in the log line content rather
 
 ```logql
 {service=~".+"} |= "req-123"
+```
+
+Trace lookup:
+
+```logql
+{service=~".+"} |= "trace_id=4bf92f3577b34da6a3ce929d0e0e4736"
+{service=~".+"} |= "\"trace_id\":\"4bf92f3577b34da6a3ce929d0e0e4736\""
 ```

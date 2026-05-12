@@ -23,11 +23,13 @@ func NewRouter(cfg config.Config, proxyHandler *handlers.ProxyHandler) http.Hand
 	mux.HandleFunc("/api/v1/notifications", proxyHandler.ProxyNotifications)
 
 	return middleware.RequestID(
-		middleware.ProxyHeaders(cfg.TrustProxyHeaders)(
-			middleware.RequireHTTPS(cfg.RequireHTTPS, cfg.TrustProxyHeaders)(
-				middleware.Logging(cfg.ServiceName)(
-					middleware.Metrics(cfg.ServiceName)(
-						middleware.Recovery(cfg.ServiceName)(mux),
+		middleware.Tracing(
+			middleware.ProxyHeaders(cfg.TrustProxyHeaders)(
+				middleware.RequireHTTPS(cfg.RequireHTTPS, cfg.TrustProxyHeaders)(
+					middleware.Logging(cfg.ServiceName)(
+						middleware.Metrics(cfg.ServiceName)(
+							middleware.Recovery(cfg.ServiceName)(mux),
+						),
 					),
 				),
 			),

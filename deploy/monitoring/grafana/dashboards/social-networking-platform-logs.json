@@ -94,6 +94,37 @@
       ],
       "title": "Warning and Error Logs",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 4,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "expr": "{service=~\"api-gateway|auth-service|users-service|posts-service|feed-service|notification-service\"} |= \"trace_id\"",
+          "refId": "A"
+        }
+      ],
+      "title": "Trace-Correlated Logs",
+      "type": "logs"
     }
   ],
   "refresh": "10s",

@@ -25,13 +25,15 @@ func Logging(serviceName string) func(http.Handler) http.Handler {
 			next.ServeHTTP(rw, r)
 
 			log.Printf(
-				"service=%s method=%s path=%s status=%d duration_ms=%d request_id=%s",
+				"service=%s method=%s path=%s status=%d duration_ms=%d request_id=%s trace_id=%s span_id=%s",
 				serviceName,
 				r.Method,
 				r.URL.Path,
 				rw.statusCode,
 				time.Since(started).Milliseconds(),
 				GetRequestID(r.Context()),
+				GetTraceID(r.Context()),
+				GetSpanID(r.Context()),
 			)
 		})
 	}

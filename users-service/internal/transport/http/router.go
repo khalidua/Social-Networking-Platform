@@ -62,9 +62,11 @@ func NewRouter(serviceName string, userHandler *handlers.UserHandler) http.Handl
 	})
 
 	return middleware.RequestID(
-		middleware.Logging(serviceName)(
-			middleware.Metrics(serviceName)(
-				middleware.Recovery(serviceName)(mux),
+		middleware.Tracing(
+			middleware.Logging(serviceName)(
+				middleware.Metrics(serviceName)(
+					middleware.Recovery(serviceName)(mux),
+				),
 			),
 		),
 	)

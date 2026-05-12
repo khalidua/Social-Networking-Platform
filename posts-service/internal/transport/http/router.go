@@ -50,10 +50,12 @@ func NewRouter(serviceName string, postHandler *handlers.PostHandler) http.Handl
 	})
 
 	return middleware.RequestID(
-		middleware.AuthenticatedUser(
-			middleware.Logging(serviceName)(
-				middleware.Metrics(serviceName)(
-					middleware.Recovery(mux),
+		middleware.Tracing(
+			middleware.AuthenticatedUser(
+				middleware.Logging(serviceName)(
+					middleware.Metrics(serviceName)(
+						middleware.Recovery(mux),
+					),
 				),
 			),
 		),

@@ -22,9 +22,11 @@ func NewRouter(
 	mux.HandleFunc("/api/v1/feed", feedHandler.GetFeed)
 
 	return middleware.RequestID(
-		middleware.Logging(serviceName)(
-			middleware.Metrics(serviceName)(
-				middleware.Recovery(mux),
+		middleware.Tracing(
+			middleware.Logging(serviceName)(
+				middleware.Metrics(serviceName)(
+					middleware.Recovery(mux),
+				),
 			),
 		),
 	)

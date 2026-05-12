@@ -20,9 +20,11 @@ func NewRouter(serviceName string, notificationService service.NotificationServi
 	mux.HandleFunc("/api/v1/notifications", featureHandler.GetNotifications)
 
 	return middleware.RequestID(
-		middleware.Logging(serviceName)(
-			middleware.Metrics(serviceName)(
-				middleware.Recovery(mux),
+		middleware.Tracing(
+			middleware.Logging(serviceName)(
+				middleware.Metrics(serviceName)(
+					middleware.Recovery(mux),
+				),
 			),
 		),
 	)

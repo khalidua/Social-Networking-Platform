@@ -98,6 +98,21 @@ Use:
 * Every error response should include the request ID
 * Every structured log should include the request ID
 
+## 5.1 Trace Context
+
+Use W3C Trace Context:
+
+`Traceparent`
+
+### Rules
+
+* If a valid `Traceparent` exists, preserve the trace id
+* If missing or invalid, generate a trace id
+* Each gateway/service hop creates a local span id
+* The gateway must propagate `Traceparent` downstream
+* Logs should include `trace_id` and `span_id`
+* Do not use trace ids or span ids as metric labels or Loki labels
+
 ## 6. Structured Logging Fields
 
 Every request log should include at least:

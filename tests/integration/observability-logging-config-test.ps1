@@ -36,6 +36,8 @@ Assert-Contains $promtail "http://loki:3100/loki/api/v1/push"
 Assert-Contains $promtail "route_group:"
 Assert-Contains $promtail "status_group:"
 Assert-Contains $promtail "request_id:"
+Assert-Contains $promtail "trace_id:"
+Assert-Contains $promtail "span_id:"
 Assert-Contains $datasources "uid: Loki"
 
 Get-Content -Raw -Path $logsDashboard | ConvertFrom-Json | Out-Null

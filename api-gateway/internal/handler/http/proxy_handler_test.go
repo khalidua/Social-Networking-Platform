@@ -31,6 +31,9 @@ func TestProxyUsersForwardsAuthenticatedRequest(t *testing.T) {
 		if r.Header.Get("X-User-ID") != "google:123" {
 			t.Fatalf("expected forwarded X-User-ID header, got %q", r.Header.Get("X-User-ID"))
 		}
+		if r.Header.Get(middleware.TraceParentHeader) != "00-4bf92f3577b34da6a3ce929d0e0e4736-1111111111111111-01" {
+			t.Fatalf("expected forwarded traceparent header, got %q", r.Header.Get(middleware.TraceParentHeader))
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -48,7 +51,9 @@ func TestProxyUsersForwardsAuthenticatedRequest(t *testing.T) {
 	}, middleware.NewUserRateLimiter(100, time.Minute)) // 100 requests per minute for each user
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
-	req = req.WithContext(context.WithValue(req.Context(), middleware.RequestIDKey, "req-123"))
+	ctx := context.WithValue(req.Context(), middleware.RequestIDKey, "req-123")
+	ctx = context.WithValue(ctx, middleware.TraceParentKey, "00-4bf92f3577b34da6a3ce929d0e0e4736-1111111111111111-01")
+	req = req.WithContext(ctx)
 	req.Header.Set("Authorization", "Bearer "+mustSignTestToken(t, "secret", "auth-service", "google:123", "session-1", "user@example.com"))
 	recorder := httptest.NewRecorder()
 

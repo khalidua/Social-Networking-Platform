@@ -266,6 +266,8 @@ func logRateLimitExceeded(r *http.Request, userID string, requestID string, limi
 		"service":        "api-gateway",
 		"request_id":     requestID,
 		"correlation_id": middleware.GetCorrelationID(r.Context()),
+		"trace_id":       middleware.GetTraceID(r.Context()),
+		"span_id":        middleware.GetSpanID(r.Context()),
 		"user_id":        userID,
 		"method":         r.Method,
 		"path":           r.URL.Path,
@@ -321,6 +323,7 @@ func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targ
 
 		req.Header.Set(middleware.RequestIDHeader, requestID)
 		req.Header.Set(middleware.CorrelationIDHeader, correlationID)
+		req.Header.Set(middleware.TraceParentHeader, middleware.GetTraceParent(r.Context()))
 		req.Header.Set("X-Gateway-Service", "api-gateway")
 		req.Header.Set("X-Upstream-Service", upstreamService)
 
@@ -334,6 +337,9 @@ func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targ
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		resp.Header.Set(middleware.RequestIDHeader, requestID)
 		resp.Header.Set(middleware.CorrelationIDHeader, correlationID)
+		if resp.Header.Get(middleware.TraceParentHeader) == "" {
+			resp.Header.Set(middleware.TraceParentHeader, middleware.GetTraceParent(r.Context()))
+		}
 		resp.Header.Set("X-Upstream-Service", upstreamService)
 		return nil
 	}
@@ -343,6 +349,7 @@ func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targ
 
 		rw.Header().Set(middleware.RequestIDHeader, requestID)
 		rw.Header().Set(middleware.CorrelationIDHeader, correlationID)
+		rw.Header().Set(middleware.TraceParentHeader, middleware.GetTraceParent(r.Context()))
 		rw.Header().Set("X-Upstream-Service", upstreamService)
 
 		status := http.StatusBadGateway
@@ -381,6 +388,8 @@ func logUpstreamError(r *http.Request, upstreamService string, targetURL string,
 		"service":          "api-gateway",
 		"request_id":       middleware.GetRequestID(r.Context()),
 		"correlation_id":   middleware.GetCorrelationID(r.Context()),
+		"trace_id":         middleware.GetTraceID(r.Context()),
+		"span_id":          middleware.GetSpanID(r.Context()),
 		"method":           r.Method,
 		"path":             r.URL.Path,
 		"upstream_service": upstreamService,

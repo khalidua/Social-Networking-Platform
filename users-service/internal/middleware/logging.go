@@ -33,6 +33,8 @@ func Logging(serviceName string) func(http.Handler) http.Handler {
 				"level":       "INFO",
 				"service":     serviceName,
 				"request_id":  GetRequestID(r.Context()),
+				"trace_id":    GetTraceID(r.Context()),
+				"span_id":     GetSpanID(r.Context()),
 				"method":      r.Method,
 				"path":        r.URL.Path,
 				"status":      rw.statusCode,

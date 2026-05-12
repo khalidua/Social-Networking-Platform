@@ -4,15 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"time"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type responseWriter struct {
 	http.ResponseWriter
 	statusCode int
-	bytes int
+	bytes      int
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
@@ -47,8 +47,10 @@ func Logging(serviceName string) func(http.Handler) http.Handler {
 				"level":          "INFO",
 				"event":          "http_access",
 				"service":        serviceName,
-				"request_id":  	  GetRequestID(r.Context()),
+				"request_id":     GetRequestID(r.Context()),
 				"correlation_id": GetCorrelationID(r.Context()),
+				"trace_id":       GetTraceID(r.Context()),
+				"span_id":        GetSpanID(r.Context()),
 				"method":         r.Method,
 				"path":           r.URL.Path,
 				"route_group":    routeGroup(r.URL.Path),
