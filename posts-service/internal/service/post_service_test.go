@@ -413,6 +413,36 @@ func TestUpdatePost_MapsRepositoryNotFound(t *testing.T) {
 	}
 }
 
+func TestUpdatePost_PropagatesRepositoryErrors(t *testing.T) {
+	ctx := context.Background()
+	repoErr := errors.New("database unavailable")
+	repo := &mockPostRepository{
+		getPostByIDFunc: func(ctx context.Context, id string) (*domain.Post, error) {
+			return nil, repoErr
+		},
+	}
+	svc := NewPostService(repo, nil)
+
+	_, err := svc.UpdatePost(ctx, "author-1", "post-1", "edited")
+	if !errors.Is(err, repoErr) {
+		t.Fatalf("expected fetch error, got %v", err)
+	}
+
+	repo = &mockPostRepository{
+		getPostByIDFunc: func(ctx context.Context, id string) (*domain.Post, error) {
+			return &domain.Post{ID: "post-1", AuthorID: "author-1", Content: "old"}, nil
+		},
+		updatePostFunc: func(ctx context.Context, post *domain.Post) error {
+			return repoErr
+		},
+	}
+	svc = NewPostService(repo, nil)
+	_, err = svc.UpdatePost(ctx, "author-1", "post-1", "edited")
+	if !errors.Is(err, repoErr) {
+		t.Fatalf("expected update error, got %v", err)
+	}
+}
+
 func TestDeletePost_DeletesOwnedPost(t *testing.T) {
 	ctx := context.Background()
 	repo := &mockPostRepository{
@@ -484,6 +514,36 @@ func TestDeletePost_MapsRepositoryNotFound(t *testing.T) {
 	}
 }
 
+func TestDeletePost_PropagatesRepositoryErrors(t *testing.T) {
+	ctx := context.Background()
+	repoErr := errors.New("database unavailable")
+	repo := &mockPostRepository{
+		getPostByIDFunc: func(ctx context.Context, id string) (*domain.Post, error) {
+			return nil, repoErr
+		},
+	}
+	svc := NewPostService(repo, nil)
+
+	err := svc.DeletePost(ctx, "author-1", "post-1")
+	if !errors.Is(err, repoErr) {
+		t.Fatalf("expected fetch error, got %v", err)
+	}
+
+	repo = &mockPostRepository{
+		getPostByIDFunc: func(ctx context.Context, id string) (*domain.Post, error) {
+			return &domain.Post{ID: "post-1", AuthorID: "author-1"}, nil
+		},
+		deletePostFunc: func(ctx context.Context, id string) error {
+			return repoErr
+		},
+	}
+	svc = NewPostService(repo, nil)
+	err = svc.DeletePost(ctx, "author-1", "post-1")
+	if !errors.Is(err, repoErr) {
+		t.Fatalf("expected delete error, got %v", err)
+	}
+}
+
 func TestInteractWithPostPublishesLike(t *testing.T) {
 	ctx := context.Background()
 	repo := &mockPostRepository{
@@ -548,5 +608,89 @@ func TestInteractWithPostRejectsUnsupportedType(t *testing.T) {
 	}
 	if interaction != nil {
 		t.Fatalf("expected nil interaction, got %+v", interaction)
+	}
+}
+
+func TestInteractWithPostDefaultsBlankTypeToLike(t *testing.T) {
+	ctx := context.Background()
+	repo := &mockPostRepository{
+		getPostByIDFunc: func(ctx context.Context, id string) (*domain.Post, error) {
+			return &domain.Post{ID: "post-1", AuthorID: "author-1"}, nil
+		},
+	}
+	producer := &mockPostProducer{}
+	svc := NewPostService(repo, producer)
+
+	interaction, err := svc.InteractWithPost(ctx, "actor-1", "post-1", " ")
+	if err != nil {
+		t.Fatalf("InteractWithPost returned error: %v", err)
+	}
+	if interaction.InteractionType != "like" {
+		t.Fatalf("expected blank interaction type to default to like, got %q", interaction.InteractionType)
+	}
+	if producer.interactionCallCount != 1 {
+		t.Fatalf("interactionCallCount = %d, want 1", producer.interactionCallCount)
+	}
+}
+
+func TestInteractWithPostRejectsMissingActorOrPost(t *testing.T) {
+	ctx := context.Background()
+	svc := NewPostService(&mockPostRepository{}, &mockPostProducer{})
+
+	if interaction, err := svc.InteractWithPost(ctx, " ", "post-1", "like"); !errors.Is(err, ErrValidation) || interaction != nil {
+		t.Fatalf("expected missing actor validation error, got interaction=%+v err=%v", interaction, err)
+	}
+	if interaction, err := svc.InteractWithPost(ctx, "actor-1", " ", "like"); !errors.Is(err, ErrValidation) || interaction != nil {
+		t.Fatalf("expected missing post validation error, got interaction=%+v err=%v", interaction, err)
+	}
+}
+
+func TestInteractWithPostNotFoundAndRepositoryError(t *testing.T) {
+	ctx := context.Background()
+	repoErr := errors.New("database unavailable")
+	repo := &mockPostRepository{
+		getPostByIDFunc: func(ctx context.Context, id string) (*domain.Post, error) {
+			return nil, nil
+		},
+	}
+	svc := NewPostService(repo, &mockPostProducer{})
+
+	interaction, err := svc.InteractWithPost(ctx, "actor-1", "missing", "like")
+	if !errors.Is(err, ErrPostNotFound) || interaction != nil {
+		t.Fatalf("expected not found, got interaction=%+v err=%v", interaction, err)
+	}
+
+	repo = &mockPostRepository{
+		getPostByIDFunc: func(ctx context.Context, id string) (*domain.Post, error) {
+			return nil, repoErr
+		},
+	}
+	svc = NewPostService(repo, &mockPostProducer{})
+	interaction, err = svc.InteractWithPost(ctx, "actor-1", "post-1", "like")
+	if !errors.Is(err, repoErr) || interaction != nil {
+		t.Fatalf("expected repository error, got interaction=%+v err=%v", interaction, err)
+	}
+}
+
+func TestInteractWithPostIgnoresPublishFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := &mockPostRepository{
+		getPostByIDFunc: func(ctx context.Context, id string) (*domain.Post, error) {
+			return &domain.Post{ID: "post-1", AuthorID: "author-1"}, nil
+		},
+	}
+	producer := &mockPostProducer{
+		publishInteractedFunc: func(ctx context.Context, interaction domain.PostInteraction) error {
+			return errors.New("kafka unavailable")
+		},
+	}
+	svc := NewPostService(repo, producer)
+
+	interaction, err := svc.InteractWithPost(ctx, "actor-1", "post-1", "like")
+	if err != nil {
+		t.Fatalf("InteractWithPost should ignore publish error, got %v", err)
+	}
+	if interaction == nil || interaction.PostID != "post-1" {
+		t.Fatalf("unexpected interaction: %+v", interaction)
 	}
 }

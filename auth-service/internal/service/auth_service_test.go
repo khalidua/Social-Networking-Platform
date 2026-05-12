@@ -15,11 +15,15 @@ type stubOAuthProvider struct {
 	authURL       string
 	tokenResponse *provider.TokenResponse
 	user          *domain.AuthUser
+	authErr       error
 	exchangeErr   error
 	userErr       error
 }
 
 func (s *stubOAuthProvider) AuthCodeURL(state string) (string, error) {
+	if s.authErr != nil {
+		return "", s.authErr
+	}
 	return s.authURL + "?state=" + state, nil
 }
 
@@ -38,15 +42,24 @@ func (s *stubOAuthProvider) FetchUser(ctx context.Context, accessToken string) (
 }
 
 type memorySessionRepository struct {
-	sessions map[string]domain.Session
+	sessions  map[string]domain.Session
+	saveErr   error
+	getErr    error
+	deleteErr error
 }
 
 func (r *memorySessionRepository) Save(ctx context.Context, session domain.Session) error {
+	if r.saveErr != nil {
+		return r.saveErr
+	}
 	r.sessions[session.ID] = session
 	return nil
 }
 
 func (r *memorySessionRepository) GetByID(ctx context.Context, sessionID string) (*domain.Session, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
 	session, ok := r.sessions[sessionID]
 	if !ok {
 		return nil, nil
@@ -55,8 +68,85 @@ func (r *memorySessionRepository) GetByID(ctx context.Context, sessionID string)
 }
 
 func (r *memorySessionRepository) DeleteByID(ctx context.Context, sessionID string) error {
+	if r.deleteErr != nil {
+		return r.deleteErr
+	}
 	delete(r.sessions, sessionID)
 	return nil
+}
+
+type failingStateManager struct{}
+
+func (failingStateManager) Generate() (string, error) {
+	return "", errors.New("state generation failed")
+}
+
+func (failingStateManager) Validate(state string) error {
+	return nil
+}
+
+type fakeTokenManager struct {
+	claims   *security.TokenClaims
+	issueErr error
+	parseErr error
+}
+
+func (m *fakeTokenManager) Issue(user domain.AuthUser, session domain.Session) (string, error) {
+	if m.issueErr != nil {
+		return "", m.issueErr
+	}
+	return "signed-token", nil
+}
+
+func (m *fakeTokenManager) Parse(token string) (*security.TokenClaims, error) {
+	if m.parseErr != nil {
+		return nil, m.parseErr
+	}
+	return m.claims, nil
+}
+
+func TestAuthServiceBeginLogin(t *testing.T) {
+	stateManager := security.NewStateManager("secret", 10*time.Minute)
+	service := NewAuthService(
+		&stubOAuthProvider{authURL: "https://accounts.google.com/o/oauth2/v2/auth"},
+		stateManager,
+		&fakeTokenManager{},
+		&memorySessionRepository{sessions: map[string]domain.Session{}},
+		time.Hour,
+	)
+
+	redirectURL, err := service.BeginLogin(context.Background())
+	if err != nil {
+		t.Fatalf("BeginLogin returned error: %v", err)
+	}
+	if redirectURL == "" {
+		t.Fatal("expected redirect URL")
+	}
+}
+
+func TestAuthServiceBeginLoginMapsStateAndProviderErrors(t *testing.T) {
+	service := NewAuthService(
+		&stubOAuthProvider{},
+		failingStateManager{},
+		&fakeTokenManager{},
+		&memorySessionRepository{sessions: map[string]domain.Session{}},
+		time.Hour,
+	)
+	if _, err := service.BeginLogin(context.Background()); AsServiceError(err).Code != "INTERNAL_ERROR" {
+		t.Fatalf("expected state error to map to INTERNAL_ERROR, got %v", err)
+	}
+
+	stateManager := security.NewStateManager("secret", 10*time.Minute)
+	service = NewAuthService(
+		&stubOAuthProvider{authErr: errors.New("not configured")},
+		stateManager,
+		&fakeTokenManager{},
+		&memorySessionRepository{sessions: map[string]domain.Session{}},
+		time.Hour,
+	)
+	if _, err := service.BeginLogin(context.Background()); AsServiceError(err).Code != "INTERNAL_ERROR" {
+		t.Fatalf("expected provider error to map to INTERNAL_ERROR, got %v", err)
+	}
 }
 
 func TestAuthServiceHandleCallbackCreatesSessionAndToken(t *testing.T) {
@@ -126,6 +216,79 @@ func TestAuthServiceHandleCallbackReturnsUpstreamError(t *testing.T) {
 	}
 }
 
+func TestAuthServiceHandleCallbackValidationErrors(t *testing.T) {
+	stateManager := security.NewStateManager("secret", 10*time.Minute)
+	service := NewAuthService(
+		&stubOAuthProvider{},
+		stateManager,
+		&fakeTokenManager{},
+		&memorySessionRepository{sessions: map[string]domain.Session{}},
+		time.Hour,
+	)
+
+	if _, err := service.HandleCallback(context.Background(), " ", "state"); AsServiceError(err).Code != "BAD_REQUEST" {
+		t.Fatalf("expected missing code BAD_REQUEST, got %v", err)
+	}
+	if _, err := service.HandleCallback(context.Background(), "code", " "); AsServiceError(err).Code != "BAD_REQUEST" {
+		t.Fatalf("expected missing state BAD_REQUEST, got %v", err)
+	}
+	if _, err := service.HandleCallback(context.Background(), "code", "invalid-state"); AsServiceError(err).Code != "BAD_REQUEST" {
+		t.Fatalf("expected invalid state BAD_REQUEST, got %v", err)
+	}
+}
+
+func TestAuthServiceHandleCallbackMapsFetchTokenAndSaveErrors(t *testing.T) {
+	stateManager := security.NewStateManager("secret", 10*time.Minute)
+	state, err := stateManager.Generate()
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	service := NewAuthService(
+		&stubOAuthProvider{
+			tokenResponse: &provider.TokenResponse{AccessToken: "google-access-token"},
+			userErr:       errors.New("userinfo down"),
+		},
+		stateManager,
+		&fakeTokenManager{},
+		&memorySessionRepository{sessions: map[string]domain.Session{}},
+		time.Hour,
+	)
+	if _, err := service.HandleCallback(context.Background(), "code", state); AsServiceError(err).Code != "UPSTREAM_UNAVAILABLE" {
+		t.Fatalf("expected FetchUser error to map to UPSTREAM_UNAVAILABLE, got %v", err)
+	}
+
+	state, _ = stateManager.Generate()
+	service = NewAuthService(
+		&stubOAuthProvider{
+			tokenResponse: &provider.TokenResponse{AccessToken: "google-access-token"},
+			user:          &domain.AuthUser{ID: "google:123", Email: "user@example.com"},
+		},
+		stateManager,
+		&fakeTokenManager{issueErr: errors.New("sign failed")},
+		&memorySessionRepository{sessions: map[string]domain.Session{}},
+		time.Hour,
+	)
+	if _, err := service.HandleCallback(context.Background(), "code", state); AsServiceError(err).Code != "INTERNAL_ERROR" {
+		t.Fatalf("expected token issue error to map to INTERNAL_ERROR, got %v", err)
+	}
+
+	state, _ = stateManager.Generate()
+	service = NewAuthService(
+		&stubOAuthProvider{
+			tokenResponse: &provider.TokenResponse{AccessToken: "google-access-token"},
+			user:          &domain.AuthUser{ID: "google:123", Email: "user@example.com"},
+		},
+		stateManager,
+		&fakeTokenManager{},
+		&memorySessionRepository{sessions: map[string]domain.Session{}, saveErr: errors.New("redis down")},
+		time.Hour,
+	)
+	if _, err := service.HandleCallback(context.Background(), "code", state); AsServiceError(err).Code != "INTERNAL_ERROR" {
+		t.Fatalf("expected session save error to map to INTERNAL_ERROR, got %v", err)
+	}
+}
+
 func TestAuthServiceLogoutInvalidatesSession(t *testing.T) {
 	stateManager := security.NewStateManager("secret", 10*time.Minute)
 	tokenManager := security.NewTokenManager("secret", "auth-service", time.Hour)
@@ -161,5 +324,145 @@ func TestAuthServiceLogoutInvalidatesSession(t *testing.T) {
 	}
 	if _, ok := sessionRepo.sessions[session.ID]; ok {
 		t.Fatal("expected session to be deleted")
+	}
+}
+
+func TestAuthServiceLogoutMapsDeleteError(t *testing.T) {
+	tokenManager := &fakeTokenManager{
+		claims: &security.TokenClaims{
+			Subject:   "google:123",
+			SessionID: "session-1",
+		},
+	}
+	service := NewAuthService(
+		&stubOAuthProvider{},
+		security.NewStateManager("secret", 10*time.Minute),
+		tokenManager,
+		&memorySessionRepository{sessions: map[string]domain.Session{}, deleteErr: errors.New("redis down")},
+		time.Hour,
+	)
+
+	err := service.Logout(context.Background(), "Bearer token")
+	if AsServiceError(err).Code != "INTERNAL_ERROR" {
+		t.Fatalf("expected delete error to map to INTERNAL_ERROR, got %v", err)
+	}
+}
+
+func TestAuthServiceValidateSessionReturnsClaimsBackedUser(t *testing.T) {
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	session := domain.Session{
+		ID:        "session-1",
+		UserID:    "google:123",
+		Email:     "user@example.com",
+		ExpiresAt: expiresAt,
+	}
+	service := NewAuthService(
+		&stubOAuthProvider{},
+		security.NewStateManager("secret", 10*time.Minute),
+		&fakeTokenManager{
+			claims: &security.TokenClaims{
+				Subject:   "google:123",
+				Email:     "user@example.com",
+				Name:      "Example User",
+				Picture:   "https://example.com/avatar.png",
+				SessionID: "session-1",
+			},
+		},
+		&memorySessionRepository{sessions: map[string]domain.Session{"session-1": session}},
+		time.Hour,
+	)
+
+	result, err := service.ValidateSession(context.Background(), "Bearer token")
+	if err != nil {
+		t.Fatalf("ValidateSession returned error: %v", err)
+	}
+	if result.User.ID != "google:123" || result.SessionID != "session-1" || !result.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("unexpected validation result: %+v", result)
+	}
+}
+
+func TestAuthServiceValidateSessionRejectsInvalidOrExpiredSessions(t *testing.T) {
+	tokenManager := &fakeTokenManager{
+		claims: &security.TokenClaims{
+			Subject:   "google:123",
+			SessionID: "session-1",
+		},
+	}
+	service := NewAuthService(
+		&stubOAuthProvider{},
+		security.NewStateManager("secret", 10*time.Minute),
+		tokenManager,
+		&memorySessionRepository{sessions: map[string]domain.Session{}},
+		time.Hour,
+	)
+	if _, err := service.ValidateSession(context.Background(), "Bearer token"); AsServiceError(err).Code != "UNAUTHENTICATED" {
+		t.Fatalf("expected revoked session UNAUTHENTICATED, got %v", err)
+	}
+
+	service = NewAuthService(
+		&stubOAuthProvider{},
+		security.NewStateManager("secret", 10*time.Minute),
+		tokenManager,
+		&memorySessionRepository{sessions: map[string]domain.Session{
+			"session-1": {
+				ID:        "session-1",
+				UserID:    "other-user",
+				ExpiresAt: time.Now().UTC().Add(time.Hour),
+			},
+		}},
+		time.Hour,
+	)
+	if _, err := service.ValidateSession(context.Background(), "Bearer token"); AsServiceError(err).Code != "UNAUTHENTICATED" {
+		t.Fatalf("expected subject mismatch UNAUTHENTICATED, got %v", err)
+	}
+
+	service = NewAuthService(
+		&stubOAuthProvider{},
+		security.NewStateManager("secret", 10*time.Minute),
+		tokenManager,
+		&memorySessionRepository{sessions: map[string]domain.Session{
+			"session-1": {
+				ID:        "session-1",
+				UserID:    "google:123",
+				ExpiresAt: time.Now().UTC().Add(-time.Minute),
+			},
+		}},
+		time.Hour,
+	)
+	if _, err := service.ValidateSession(context.Background(), "Bearer token"); AsServiceError(err).Code != "UNAUTHENTICATED" {
+		t.Fatalf("expected expired session UNAUTHENTICATED, got %v", err)
+	}
+}
+
+func TestAuthServiceParseBearerTokenErrors(t *testing.T) {
+	service := NewAuthService(
+		&stubOAuthProvider{},
+		security.NewStateManager("secret", 10*time.Minute),
+		&fakeTokenManager{parseErr: errors.New("bad signature")},
+		&memorySessionRepository{sessions: map[string]domain.Session{}},
+		time.Hour,
+	)
+
+	if _, err := service.ValidateSession(context.Background(), " "); AsServiceError(err).Code != "UNAUTHENTICATED" {
+		t.Fatalf("expected missing bearer token UNAUTHENTICATED, got %v", err)
+	}
+	if _, err := service.ValidateSession(context.Background(), "Bearer bad-token"); AsServiceError(err).Code != "UNAUTHENTICATED" {
+		t.Fatalf("expected invalid bearer token UNAUTHENTICATED, got %v", err)
+	}
+}
+
+func TestAuthServiceValidateSessionMapsRepositoryError(t *testing.T) {
+	service := NewAuthService(
+		&stubOAuthProvider{},
+		security.NewStateManager("secret", 10*time.Minute),
+		&fakeTokenManager{
+			claims: &security.TokenClaims{Subject: "google:123", SessionID: "session-1"},
+		},
+		&memorySessionRepository{sessions: map[string]domain.Session{}, getErr: errors.New("redis down")},
+		time.Hour,
+	)
+
+	if _, err := service.ValidateSession(context.Background(), "Bearer token"); AsServiceError(err).Code != "INTERNAL_ERROR" {
+		t.Fatalf("expected session repository error to map to INTERNAL_ERROR, got %v", err)
 	}
 }

@@ -128,6 +128,22 @@ func TestCreateFollowNotificationIgnoresSelfFollow(t *testing.T) {
 	}
 }
 
+func TestCreateFollowNotificationRejectsMissingIDsAndPropagatesSaveError(t *testing.T) {
+	svc := NewService(&fakeNotificationRepository{})
+	if err := svc.CreateFollowNotification(context.Background(), " ", "followee-1"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected missing follower validation error, got %v", err)
+	}
+	if err := svc.CreateFollowNotification(context.Background(), "follower-1", " "); !errors.Is(err, ErrValidation) {
+		t.Fatalf("expected missing followee validation error, got %v", err)
+	}
+
+	repoErr := errors.New("database unavailable")
+	svc = NewService(&fakeNotificationRepository{err: repoErr})
+	if err := svc.CreateFollowNotification(context.Background(), "follower-1", "followee-1"); !errors.Is(err, repoErr) {
+		t.Fatalf("expected repository error, got %v", err)
+	}
+}
+
 func TestCreatePostInteractionNotificationPersistsLikeForAuthor(t *testing.T) {
 	repo := &fakeNotificationRepository{}
 	svc := NewService(repo)
@@ -152,5 +168,51 @@ func TestCreatePostInteractionNotificationRejectsUnsupportedType(t *testing.T) {
 	err := svc.CreatePostInteractionNotification(context.Background(), "post-1", "author-1", "actor-1", "share")
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestCreatePostInteractionNotificationRejectsMissingFieldsAndSelfInteraction(t *testing.T) {
+	svc := NewService(&fakeNotificationRepository{})
+
+	cases := []struct {
+		name         string
+		postID       string
+		postAuthorID string
+		actorID      string
+		interaction  string
+		wantErr      bool
+	}{
+		{name: "missing post", postID: " ", postAuthorID: "author-1", actorID: "actor-1", interaction: "like", wantErr: true},
+		{name: "missing author", postID: "post-1", postAuthorID: " ", actorID: "actor-1", interaction: "like", wantErr: true},
+		{name: "missing actor", postID: "post-1", postAuthorID: "author-1", actorID: " ", interaction: "like", wantErr: true},
+		{name: "missing type", postID: "post-1", postAuthorID: "author-1", actorID: "actor-1", interaction: " ", wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := svc.CreatePostInteractionNotification(context.Background(), tc.postID, tc.postAuthorID, tc.actorID, tc.interaction)
+			if tc.wantErr && !errors.Is(err, ErrValidation) {
+				t.Fatalf("expected ErrValidation, got %v", err)
+			}
+		})
+	}
+
+	repo := &fakeNotificationRepository{}
+	svc = NewService(repo)
+	if err := svc.CreatePostInteractionNotification(context.Background(), "post-1", "author-1", "author-1", "like"); err != nil {
+		t.Fatalf("self interaction should be ignored without error, got %v", err)
+	}
+	if len(repo.saved) != 0 {
+		t.Fatalf("expected no notification for self interaction, got %+v", repo.saved)
+	}
+}
+
+func TestCreatePostInteractionNotificationPropagatesSaveError(t *testing.T) {
+	repoErr := errors.New("database unavailable")
+	svc := NewService(&fakeNotificationRepository{err: repoErr})
+
+	err := svc.CreatePostInteractionNotification(context.Background(), "post-1", "author-1", "actor-1", "like")
+	if !errors.Is(err, repoErr) {
+		t.Fatalf("expected repository error, got %v", err)
 	}
 }
