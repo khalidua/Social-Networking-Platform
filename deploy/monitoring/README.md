@@ -6,7 +6,7 @@ This folder contains the local Prometheus and Grafana configuration for issue 9 
 
 - Prometheus scrapes gateway and service `/metrics` endpoints.
 - Prometheus scrapes Redis, Kafka, PostgreSQL, host, and container exporters.
-- Grafana provisions the Prometheus datasource and the Social Networking Platform dashboard.
+- Grafana provisions the Prometheus and Loki datasources plus platform dashboards.
 - Prometheus loads alert rules for service availability, HTTP errors, latency, Redis, PostgreSQL, Kafka, consumer lag, and host memory usage.
 
 ## Local URLs
@@ -15,6 +15,7 @@ When the compose stack is running:
 
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000`
+- Loki: `http://localhost:3100`
 - cAdvisor: `http://localhost:8086`
 - node-exporter: `http://localhost:9100`
 - redis-exporter: `http://localhost:9121`
@@ -55,6 +56,7 @@ docker compose -f deploy\compose\compose.yml up --build
 ```
 
 Then open Grafana and select the `Social Networking Platform Overview` dashboard.
+For centralized logs, select the `Social Networking Platform Logs` dashboard or use the Loki datasource in Explore.
 
 ## Alert Rule Validation
 

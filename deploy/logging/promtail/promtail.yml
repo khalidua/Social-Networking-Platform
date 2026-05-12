@@ -1,0 +1,54 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker-containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+
+    relabel_configs:
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: container
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_service"]
+        target_label: service
+      - source_labels: ["__meta_docker_container_label_com_docker_compose_project"]
+        target_label: compose_project
+      - source_labels: ["__meta_docker_container_log_stream"]
+        target_label: stream
+
+    pipeline_stages:
+      - docker: {}
+      - json:
+          expressions:
+            timestamp:
+            level:
+            event:
+            request_id:
+            correlation_id:
+            method:
+            path:
+            route_group:
+            status:
+            status_group:
+            duration_ms:
+            upstream_service:
+          drop_malformed: false
+      - labels:
+          level:
+          event:
+          route_group:
+          status_group:
+          upstream_service:
+      - timestamp:
+          source: timestamp
+          format: RFC3339
+          action_on_failure: skip

@@ -322,6 +322,7 @@ services:
     container_name: snp-grafana
     depends_on:
       - prometheus
+      - loki
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
@@ -332,6 +333,34 @@ services:
       - grafana-data:/var/lib/grafana
     ports:
       - "3000:3000"
+    networks:
+      - snp-net
+
+  loki:
+    image: grafana/loki:3.1.1
+    container_name: snp-loki
+    command:
+      - "-config.file=/etc/loki/loki.yml"
+    volumes:
+      - ../logging/loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    networks:
+      - snp-net
+
+  promtail:
+    image: grafana/promtail:3.1.1
+    container_name: snp-promtail
+    depends_on:
+      - loki
+    command:
+      - "-config.file=/etc/promtail/promtail.yml"
+    volumes:
+      - ../logging/promtail/promtail.yml:/etc/promtail/promtail.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "9080:9080"
     networks:
       - snp-net
 
@@ -430,3 +459,4 @@ volumes:
   redis-data:
   prometheus-data:
   grafana-data:
+  loki-data:
