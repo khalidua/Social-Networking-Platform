@@ -16,6 +16,7 @@ func NewRouter(serviceName string, postHandler *handlers.PostHandler) http.Handl
 	healthHandler := handlers.NewHealthHandler(serviceName)
 
 	mux.HandleFunc("/health", healthHandler.Health)
+	mux.Handle("/metrics", middleware.MetricsHandler(serviceName))
 
 	mux.HandleFunc("/api/v1/posts", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -51,7 +52,9 @@ func NewRouter(serviceName string, postHandler *handlers.PostHandler) http.Handl
 	return middleware.RequestID(
 		middleware.AuthenticatedUser(
 			middleware.Logging(serviceName)(
-				middleware.Recovery(mux),
+				middleware.Metrics(serviceName)(
+					middleware.Recovery(mux),
+				),
 			),
 		),
 	)

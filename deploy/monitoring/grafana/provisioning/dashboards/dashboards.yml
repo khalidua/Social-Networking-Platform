@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Social Networking Platform
+    orgId: 1
+    folder: Social Networking Platform
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

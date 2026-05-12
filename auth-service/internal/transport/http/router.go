@@ -15,6 +15,7 @@ func NewRouter(serviceName string, authHandler *handlers.AuthHandler) http.Handl
 	healthHandler := handlers.NewHealthHandler(serviceName)
 
 	mux.HandleFunc("/health", healthHandler.Health)
+	mux.Handle("/metrics", middleware.MetricsHandler(serviceName))
 	mux.HandleFunc("/api/v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w, r)
@@ -46,7 +47,9 @@ func NewRouter(serviceName string, authHandler *handlers.AuthHandler) http.Handl
 
 	return middleware.RequestID(
 		middleware.Logging(serviceName)(
-			middleware.Recovery(mux),
+			middleware.Metrics(serviceName)(
+				middleware.Recovery(mux),
+			),
 		),
 	)
 }

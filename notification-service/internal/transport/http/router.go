@@ -15,12 +15,15 @@ func NewRouter(serviceName string, notificationService service.NotificationServi
 	featureHandler := handlers.NewNotificationHandler(notificationService)
 
 	mux.HandleFunc("/health", healthHandler.Health)
+	mux.Handle("/metrics", middleware.MetricsHandler(serviceName))
 
 	mux.HandleFunc("/api/v1/notifications", featureHandler.GetNotifications)
 
 	return middleware.RequestID(
 		middleware.Logging(serviceName)(
-			middleware.Recovery(mux),
+			middleware.Metrics(serviceName)(
+				middleware.Recovery(mux),
+			),
 		),
 	)
 }

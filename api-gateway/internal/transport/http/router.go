@@ -14,6 +14,7 @@ func NewRouter(cfg config.Config, proxyHandler *handlers.ProxyHandler) http.Hand
 	healthHandler := handlers.NewHealthHandler(cfg.ServiceName)
 
 	mux.HandleFunc("/health", healthHandler.Health)
+	mux.Handle("/metrics", middleware.MetricsHandler(cfg.ServiceName))
 	mux.HandleFunc("/api/v1/auth/", proxyHandler.ProxyAuth)
 	mux.HandleFunc("/api/v1/users/", proxyHandler.ProxyUsers)
 	mux.HandleFunc("/api/v1/posts", proxyHandler.ProxyPosts)
@@ -25,7 +26,9 @@ func NewRouter(cfg config.Config, proxyHandler *handlers.ProxyHandler) http.Hand
 		middleware.ProxyHeaders(cfg.TrustProxyHeaders)(
 			middleware.RequireHTTPS(cfg.RequireHTTPS, cfg.TrustProxyHeaders)(
 				middleware.Logging(cfg.ServiceName)(
-					middleware.Recovery(cfg.ServiceName)(mux),
+					middleware.Metrics(cfg.ServiceName)(
+						middleware.Recovery(cfg.ServiceName)(mux),
+					),
 				),
 			),
 		),

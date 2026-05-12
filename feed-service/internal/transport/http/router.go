@@ -17,12 +17,15 @@ func NewRouter(
 	healthHandler := handlers.NewHealthHandler(serviceName)
 
 	mux.HandleFunc("/health", healthHandler.Health)
+	mux.Handle("/metrics", middleware.MetricsHandler(serviceName))
 
 	mux.HandleFunc("/api/v1/feed", feedHandler.GetFeed)
 
 	return middleware.RequestID(
 		middleware.Logging(serviceName)(
-			middleware.Recovery(mux),
+			middleware.Metrics(serviceName)(
+				middleware.Recovery(mux),
+			),
 		),
 	)
 }
