@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"social-networking-platform/api-gateway/internal/apiresponse"
@@ -28,11 +30,14 @@ type ProxyHandler struct {
 	notificationServiceURL string
 
 	upstreamTimeout time.Duration
+	retry           retryConfig
+	circuit         circuitConfig
+	breakerMu       sync.Mutex
+	breakers        map[string]*circuitBreaker
 
 	tokenVerifier *security.TokenVerifier
-	sessions 	  sessionReader
+	sessions      sessionReader
 	rateLimiter   rateLimiter
-	
 }
 
 type sessionReader interface {
@@ -44,16 +49,41 @@ type rateLimiter interface {
 }
 
 func NewProxyHandler(cfg config.Config, tokenVerifier *security.TokenVerifier, sessions sessionReader, rateLimiter rateLimiter) *ProxyHandler {
+	retryAttempts := cfg.UpstreamRetryAttempts
+	if retryAttempts <= 0 {
+		retryAttempts = 3
+	}
+	retryBackoff := cfg.UpstreamRetryBackoff
+	if retryBackoff <= 0 {
+		retryBackoff = 100 * time.Millisecond
+	}
+	circuitFailures := cfg.CircuitBreakerFailures
+	if circuitFailures <= 0 {
+		circuitFailures = 5
+	}
+	circuitOpenFor := cfg.CircuitBreakerOpenFor
+	if circuitOpenFor <= 0 {
+		circuitOpenFor = 30 * time.Second
+	}
 	return &ProxyHandler{
 		authServiceURL:         cfg.AuthServiceURL,
 		usersServiceURL:        cfg.UsersServiceURL,
 		postsServiceURL:        cfg.PostsServiceURL,
 		feedServiceURL:         cfg.FeedServiceURL,
 		notificationServiceURL: cfg.NotificationServiceURL,
-		upstreamTimeout: 		cfg.UpstreamTimeout,
-		tokenVerifier:          tokenVerifier,
-		sessions:               sessions,
-		rateLimiter:            rateLimiter,
+		upstreamTimeout:        cfg.UpstreamTimeout,
+		retry: retryConfig{
+			attempts: retryAttempts,
+			backoff:  retryBackoff,
+		},
+		circuit: circuitConfig{
+			failures: circuitFailures,
+			openFor:  circuitOpenFor,
+		},
+		breakers:      map[string]*circuitBreaker{},
+		tokenVerifier: tokenVerifier,
+		sessions:      sessions,
+		rateLimiter:   rateLimiter,
 	}
 }
 
@@ -230,17 +260,17 @@ func (h *ProxyHandler) allowUserRequest(w http.ResponseWriter, r *http.Request, 
 
 func logRateLimitExceeded(r *http.Request, userID string, requestID string, limit int, resetAt time.Time) {
 	entry := map[string]interface{}{
-		"timestamp":  time.Now().UTC().Format(time.RFC3339),
-		"level":      "WARN",
-		"event":      "rate_limit_exceeded",
-		"service":    "api-gateway",
-		"request_id": requestID,
+		"timestamp":      time.Now().UTC().Format(time.RFC3339),
+		"level":          "WARN",
+		"event":          "rate_limit_exceeded",
+		"service":        "api-gateway",
+		"request_id":     requestID,
 		"correlation_id": middleware.GetCorrelationID(r.Context()),
-		"user_id":    userID,
-		"method":     r.Method,
-		"path":       r.URL.Path,
-		"limit":      limit,
-		"reset_at":   resetAt.UTC().Format(time.RFC3339),
+		"user_id":        userID,
+		"method":         r.Method,
+		"path":           r.URL.Path,
+		"limit":          limit,
+		"reset_at":       resetAt.UTC().Format(time.RFC3339),
 	}
 
 	_ = json.NewEncoder(os.Stdout).Encode(entry)
@@ -249,7 +279,6 @@ func logRateLimitExceeded(r *http.Request, userID string, requestID string, limi
 func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targetURL string, upstreamService string, claims *security.TokenClaims) {
 	requestID := middleware.GetRequestID(r.Context())
 	correlationID := middleware.GetCorrelationID(r.Context())
-
 
 	target, err := url.Parse(targetURL)
 	if err != nil {
@@ -268,11 +297,17 @@ func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targ
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
-	proxy.Transport = &http.Transport{
+	baseTransport := &http.Transport{
 		DialContext: (&net.Dialer{
 			Timeout: h.upstreamTimeout,
 		}).DialContext,
 		ResponseHeaderTimeout: h.upstreamTimeout,
+	}
+	proxy.Transport = &resilientTransport{
+		base:            baseTransport,
+		upstreamService: upstreamService,
+		retry:           h.retry,
+		breaker:         h.breakerFor(upstreamService),
 	}
 
 	originalDirector := proxy.Director
@@ -302,7 +337,7 @@ func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targ
 		resp.Header.Set("X-Upstream-Service", upstreamService)
 		return nil
 	}
-	
+
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
 		logUpstreamError(r, upstreamService, targetURL, proxyErr)
 
@@ -310,17 +345,32 @@ func (h *ProxyHandler) proxyRequest(w http.ResponseWriter, r *http.Request, targ
 		rw.Header().Set(middleware.CorrelationIDHeader, correlationID)
 		rw.Header().Set("X-Upstream-Service", upstreamService)
 
-		apiresponse.Error(
-			rw,
-			http.StatusBadGateway,
-			requestID,
-			apperrors.CodeUpstreamUnavailable,
-			"upstream service is unavailable",
-			proxyErr.Error(),
-		)
+		status := http.StatusBadGateway
+		message := "upstream service is unavailable"
+		if errors.Is(proxyErr, errCircuitOpen) {
+			status = http.StatusServiceUnavailable
+			message = "upstream circuit breaker is open"
+			rw.Header().Set("Retry-After", strconv.Itoa(int(h.circuit.openFor.Seconds())))
+		}
+
+		apiresponse.Error(rw, status, requestID, apperrors.CodeUpstreamUnavailable, message, proxyErr.Error())
 	}
 
 	proxy.ServeHTTP(w, r)
+}
+
+func (h *ProxyHandler) breakerFor(upstreamService string) *circuitBreaker {
+	h.breakerMu.Lock()
+	defer h.breakerMu.Unlock()
+	if h.breakers == nil {
+		h.breakers = map[string]*circuitBreaker{}
+	}
+	if breaker, ok := h.breakers[upstreamService]; ok {
+		return breaker
+	}
+	breaker := newCircuitBreaker(upstreamService, h.circuit)
+	h.breakers[upstreamService] = breaker
+	return breaker
 }
 
 func logUpstreamError(r *http.Request, upstreamService string, targetURL string, err error) {

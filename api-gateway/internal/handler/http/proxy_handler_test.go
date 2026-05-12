@@ -86,7 +86,7 @@ func TestProxyUsersRejectsRateLimitedUser(t *testing.T) {
 	defer upstream.Close()
 
 	handler := NewProxyHandler(config.Config{
-		UsersServiceURL:  upstream.URL,
+		UsersServiceURL: upstream.URL,
 		UpstreamTimeout: time.Second,
 	}, security.NewTokenVerifier("secret", "auth-service"), &fakeSessionStore{
 		session: &domain.Session{
@@ -131,6 +131,90 @@ func TestProxyUsersRejectsRateLimitedUser(t *testing.T) {
 
 	if secondRecorder.Header().Get("X-RateLimit-Limit") != "1" {
 		t.Fatalf("expected X-RateLimit-Limit=1, got %q", secondRecorder.Header().Get("X-RateLimit-Limit"))
+	}
+}
+
+func TestProxyAuthRetriesTransientUpstreamFailure(t *testing.T) {
+	upstreamCalls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		if upstreamCalls < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"temporary"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	handler := NewProxyHandler(config.Config{
+		AuthServiceURL:        upstream.URL,
+		UpstreamTimeout:       time.Second,
+		UpstreamRetryAttempts: 3,
+		UpstreamRetryBackoff:  time.Nanosecond,
+	}, security.NewTokenVerifier("secret", "auth-service"), &fakeSessionStore{}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/session", nil)
+	req = req.WithContext(context.WithValue(req.Context(), middleware.RequestIDKey, "req-retry"))
+	recorder := httptest.NewRecorder()
+
+	handler.ProxyAuth(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected final status 200, got %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if upstreamCalls != 3 {
+		t.Fatalf("upstreamCalls = %d, want 3", upstreamCalls)
+	}
+}
+
+func TestProxyAuthCircuitBreakerOpensAfterFailures(t *testing.T) {
+	upstreamCalls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"down"}`))
+	}))
+	defer upstream.Close()
+
+	handler := NewProxyHandler(config.Config{
+		AuthServiceURL:         upstream.URL,
+		UpstreamTimeout:        time.Second,
+		UpstreamRetryAttempts:  1,
+		UpstreamRetryBackoff:   time.Nanosecond,
+		CircuitBreakerFailures: 1,
+		CircuitBreakerOpenFor:  time.Minute,
+	}, security.NewTokenVerifier("secret", "auth-service"), &fakeSessionStore{}, nil)
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/session", nil)
+	firstReq = firstReq.WithContext(context.WithValue(firstReq.Context(), middleware.RequestIDKey, "req-breaker-1"))
+	firstRecorder := httptest.NewRecorder()
+	handler.ProxyAuth(firstRecorder, firstReq)
+
+	if firstRecorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("first request expected upstream 503, got %d body=%s", firstRecorder.Code, firstRecorder.Body.String())
+	}
+	if upstreamCalls != 1 {
+		t.Fatalf("upstreamCalls after first request = %d, want 1", upstreamCalls)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/session", nil)
+	secondReq = secondReq.WithContext(context.WithValue(secondReq.Context(), middleware.RequestIDKey, "req-breaker-2"))
+	secondRecorder := httptest.NewRecorder()
+	handler.ProxyAuth(secondRecorder, secondReq)
+
+	if secondRecorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("second request expected gateway 503, got %d body=%s", secondRecorder.Code, secondRecorder.Body.String())
+	}
+	if upstreamCalls != 1 {
+		t.Fatalf("circuit breaker should prevent second upstream call, got %d calls", upstreamCalls)
+	}
+	if secondRecorder.Header().Get("X-Upstream-Service") != "auth-service" {
+		t.Fatalf("expected X-Upstream-Service auth-service, got %q", secondRecorder.Header().Get("X-Upstream-Service"))
+	}
+	if secondRecorder.Header().Get("Retry-After") == "" {
+		t.Fatal("expected Retry-After header while circuit is open")
 	}
 }
 

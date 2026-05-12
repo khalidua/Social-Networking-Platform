@@ -27,20 +27,24 @@ type Config struct {
 	FeedServiceURL         string
 	NotificationServiceURL string
 
-	RedisHost              string
-	RedisPort              string
-	RedisPassword          string
-	RedisDB                int
+	RedisHost     string
+	RedisPort     string
+	RedisPassword string
+	RedisDB       int
 
-	JWTSecret              string
-	JWTIssuer              string
+	JWTSecret string
+	JWTIssuer string
 
 	UpstreamTimeout        time.Duration
+	UpstreamRetryAttempts  int
+	UpstreamRetryBackoff   time.Duration
+	CircuitBreakerFailures int
+	CircuitBreakerOpenFor  time.Duration
 
 	RateLimitPerMinute int
 	RateLimitWindow    time.Duration
 
-	TLSEnabled bool
+	TLSEnabled  bool
 	TLSCertFile string
 	TLSKeyFile  string
 
@@ -76,6 +80,10 @@ func Load() Config {
 	cfg.JWTIssuer = getEnv("JWT_ISSUER", "auth-service")
 
 	cfg.UpstreamTimeout = getDuration("UPSTREAM_TIMEOUT", 10*time.Second)
+	cfg.UpstreamRetryAttempts = getEnvInt("UPSTREAM_RETRY_ATTEMPTS", 3)
+	cfg.UpstreamRetryBackoff = getDuration("UPSTREAM_RETRY_BACKOFF", 100*time.Millisecond)
+	cfg.CircuitBreakerFailures = getEnvInt("CIRCUIT_BREAKER_FAILURES", 5)
+	cfg.CircuitBreakerOpenFor = getDuration("CIRCUIT_BREAKER_OPEN_FOR", 30*time.Second)
 
 	cfg.RateLimitPerMinute = getEnvInt("RATE_LIMIT_PER_MINUTE", 100)
 	cfg.RateLimitWindow = getDuration("RATE_LIMIT_WINDOW", time.Minute)
@@ -100,6 +108,18 @@ func validate(cfg Config) {
 
 	if cfg.RateLimitWindow <= 0 {
 		log.Fatal("RATE_LIMIT_WINDOW must be greater than 0")
+	}
+	if cfg.UpstreamRetryAttempts <= 0 {
+		log.Fatal("UPSTREAM_RETRY_ATTEMPTS must be greater than 0")
+	}
+	if cfg.UpstreamRetryBackoff <= 0 {
+		log.Fatal("UPSTREAM_RETRY_BACKOFF must be greater than 0")
+	}
+	if cfg.CircuitBreakerFailures <= 0 {
+		log.Fatal("CIRCUIT_BREAKER_FAILURES must be greater than 0")
+	}
+	if cfg.CircuitBreakerOpenFor <= 0 {
+		log.Fatal("CIRCUIT_BREAKER_OPEN_FOR must be greater than 0")
 	}
 
 	if cfg.TLSEnabled {
