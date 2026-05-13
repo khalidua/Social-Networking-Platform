@@ -5,6 +5,8 @@ import (
 
 	handlers "social-networking-platform/feed-service/internal/handler/http"
 	"social-networking-platform/feed-service/internal/middleware"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func NewRouter(
@@ -17,7 +19,8 @@ func NewRouter(
 	healthHandler := handlers.NewHealthHandler(serviceName)
 
 	mux.HandleFunc("/health", healthHandler.Health)
-	mux.Handle("/metrics", middleware.MetricsHandler(serviceName))
+	// mux.Handle("/metrics", middleware.MetricsHandler(serviceName))
+	mux.Handle("/metrics", promhttp.Handler())
 
 	mux.HandleFunc("/api/v1/feed", feedHandler.GetFeed)
 

@@ -8,6 +8,8 @@ import (
 	"social-networking-platform/users-service/internal/apperrors"
 	handlers "social-networking-platform/users-service/internal/handler/http"
 	"social-networking-platform/users-service/internal/middleware"
+	
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func NewRouter(serviceName string, userHandler *handlers.UserHandler) http.Handler {
@@ -16,7 +18,8 @@ func NewRouter(serviceName string, userHandler *handlers.UserHandler) http.Handl
 	healthHandler := handlers.NewHealthHandler(serviceName)
 
 	mux.HandleFunc("/health", healthHandler.Health)
-	mux.Handle("/metrics", middleware.MetricsHandler(serviceName))
+	// mux.Handle("/metrics", middleware.MetricsHandler(serviceName))
+	mux.Handle("/metrics", promhttp.Handler())
 
 	mux.HandleFunc("/api/v1/users/me", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
