@@ -1,0 +1,33 @@
+extends:
+  - spectral:oas
+
+rules:
+  # Enforce all operations have a summary
+  operation-summary:
+    message: "Operation '{{property}}' must have a summary"
+    given: "$.paths[*][get,post,patch,put,delete]"
+    severity: warn
+    then:
+      field: summary
+      function: truthy
+
+  # Enforce all operations have at least one response defined
+  operation-success-response:
+    message: "Operation must define at least a 2xx response"
+    given: "$.paths[*][get,post,patch,put,delete].responses"
+    severity: warn
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          minProperties: 1
+
+  # Require component schemas to have descriptions
+  component-schema-description:
+    message: "Schema '{{property}}' should have a description"
+    given: "$.components.schemas[*]"
+    severity: hint
+    then:
+      field: description
+      function: truthy
