@@ -10,13 +10,14 @@ import (
 	"time"
 )
 
-var latencyBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}
+var latencyBuckets = []float64{0.1, 0.3, 0.5, 1, 2, 5}
 
 type metricKey struct {
-	Service string
-	Method  string
-	Route   string
-	Status  string
+	Service     string
+	Method      string
+	Route       string
+	Status      string
+	StatusGroup string
 }
 
 type metricSnapshot struct {
@@ -92,8 +93,27 @@ func (s *metricsStore) decActive() {
 	s.mu.Unlock()
 }
 
+func statusGroup(code int) string {
+	switch {
+	case code >= 200 && code < 300:
+		return "2xx"
+	case code >= 400 && code < 500:
+		return "4xx"
+	case code >= 500:
+		return "5xx"
+	default:
+		return "other"
+	}
+}
+
 func (s *metricsStore) observe(serviceName string, method string, route string, status int, seconds float64) {
-	key := metricKey{Service: serviceName, Method: method, Route: route, Status: strconv.Itoa(status)}
+	key := metricKey{
+		Service:     serviceName,
+		Method:      method,
+		Route:       route,
+		Status:      strconv.Itoa(status),
+		StatusGroup: statusGroup(status),
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -185,7 +205,10 @@ func sortedMetricKeys(values map[metricKey]uint64) []metricKey {
 }
 
 func (k metricKey) labels() string {
-	return fmt.Sprintf("service=%q,method=%q,route=%q,status=%q", k.Service, k.Method, k.Route, k.Status)
+	return fmt.Sprintf(
+		"service=%q,method=%q,route=%q,status=%q,status_group=%q",
+		k.Service, k.Method, k.Route, k.Status, k.StatusGroup,
+	)
 }
 
 func formatFloat(v float64) string {
