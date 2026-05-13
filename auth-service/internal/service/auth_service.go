@@ -105,6 +105,12 @@ func (s *DefaultAuthService) BeginLogin(ctx context.Context) (string, error) {
 }
 
 func (s *DefaultAuthService) HandleCallback(ctx context.Context, code string, state string) (*CallbackResult, error) {
+	started := time.Now()
+	status := statusFailure
+	defer func() {
+		observeBusinessOperation(operationAuthenticateUser, started, status)
+	}()
+
 	if strings.TrimSpace(code) == "" {
 		return nil, &ServiceError{
 			Status:  http.StatusBadRequest,
@@ -183,6 +189,7 @@ func (s *DefaultAuthService) HandleCallback(ctx context.Context, code string, st
 		}
 	}
 
+	status = statusSuccess
 	return &CallbackResult{
 		Token:     signedToken,
 		ExpiresAt: expiresAt,

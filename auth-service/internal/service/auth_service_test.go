@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"social-networking-platform/auth-service/internal/domain"
 	"social-networking-platform/auth-service/internal/provider"
 	"social-networking-platform/auth-service/internal/security"
@@ -465,4 +468,137 @@ func TestAuthServiceValidateSessionMapsRepositoryError(t *testing.T) {
 	if _, err := service.ValidateSession(context.Background(), "Bearer token"); AsServiceError(err).Code != "INTERNAL_ERROR" {
 		t.Fatalf("expected session repository error to map to INTERNAL_ERROR, got %v", err)
 	}
+}
+
+func TestAuthServiceHandleCallbackRecordsBusinessMetrics(t *testing.T) {
+	stateManager := security.NewStateManager("secret", 10*time.Minute)
+	successService := NewAuthService(
+		&stubOAuthProvider{
+			tokenResponse: &provider.TokenResponse{AccessToken: "google-access-token"},
+			user: &domain.AuthUser{
+				ID:    "google:123",
+				Email: "user@example.com",
+			},
+		},
+		stateManager,
+		&fakeTokenManager{},
+		&memorySessionRepository{sessions: map[string]domain.Session{}},
+		time.Hour,
+	)
+
+	successState, err := stateManager.Generate()
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	successBefore := testutil.ToFloat64(
+		businessOperationTotal.WithLabelValues(statusSuccess),
+	)
+	durationBefore := histogramSampleCount(
+		t,
+		"auth_service_business_operation_duration_seconds",
+		map[string]string{"operation": operationAuthenticateUser},
+	)
+
+	if _, err := successService.HandleCallback(context.Background(), "google-code", successState); err != nil {
+		t.Fatalf("HandleCallback() error = %v", err)
+	}
+
+	successAfter := testutil.ToFloat64(
+		businessOperationTotal.WithLabelValues(statusSuccess),
+	)
+	if successAfter-successBefore != 1 {
+		t.Fatalf("expected success counter delta 1, got %v", successAfter-successBefore)
+	}
+
+	durationAfter := histogramSampleCount(
+		t,
+		"auth_service_business_operation_duration_seconds",
+		map[string]string{"operation": operationAuthenticateUser},
+	)
+	if durationAfter-durationBefore != 1 {
+		t.Fatalf("expected histogram count delta 1 after success, got %d", durationAfter-durationBefore)
+	}
+
+	failureService := NewAuthService(
+		&stubOAuthProvider{exchangeErr: errors.New("google down")},
+		stateManager,
+		&fakeTokenManager{},
+		&memorySessionRepository{sessions: map[string]domain.Session{}},
+		time.Hour,
+	)
+
+	failureState, err := stateManager.Generate()
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	failureBefore := testutil.ToFloat64(
+		businessOperationTotal.WithLabelValues(statusFailure),
+	)
+	durationBefore = histogramSampleCount(
+		t,
+		"auth_service_business_operation_duration_seconds",
+		map[string]string{"operation": operationAuthenticateUser},
+	)
+
+	if _, err := failureService.HandleCallback(context.Background(), "google-code", failureState); err == nil {
+		t.Fatal("expected callback error")
+	}
+
+	failureAfter := testutil.ToFloat64(
+		businessOperationTotal.WithLabelValues(statusFailure),
+	)
+	if failureAfter-failureBefore != 1 {
+		t.Fatalf("expected failure counter delta 1, got %v", failureAfter-failureBefore)
+	}
+
+	durationAfter = histogramSampleCount(
+		t,
+		"auth_service_business_operation_duration_seconds",
+		map[string]string{"operation": operationAuthenticateUser},
+	)
+	if durationAfter-durationBefore != 1 {
+		t.Fatalf("expected histogram count delta 1 after failure, got %d", durationAfter-durationBefore)
+	}
+}
+
+func histogramSampleCount(t *testing.T, metricName string, labels map[string]string) uint64 {
+	t.Helper()
+
+	metricFamilies, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error = %v", err)
+	}
+
+	for _, family := range metricFamilies {
+		if family.GetName() != metricName {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			if labelsMatch(metric, labels) {
+				histogram := metric.GetHistogram()
+				if histogram == nil {
+					t.Fatalf("metric %s is not a histogram", metricName)
+				}
+				return histogram.GetSampleCount()
+			}
+		}
+	}
+
+	return 0
+}
+
+func labelsMatch(metric *dto.Metric, labels map[string]string) bool {
+	if len(metric.GetLabel()) != len(labels) {
+		return false
+	}
+
+	for _, label := range metric.GetLabel() {
+		if labels[label.GetName()] != label.GetValue() {
+			return false
+		}
+	}
+
+	return true
 }
