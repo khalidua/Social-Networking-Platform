@@ -7,6 +7,8 @@ import (
 	"social-networking-platform/auth-service/internal/apperrors"
 	handlers "social-networking-platform/auth-service/internal/handler/http"
 	"social-networking-platform/auth-service/internal/middleware"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func NewRouter(serviceName string, authHandler *handlers.AuthHandler) http.Handler {
@@ -15,7 +17,8 @@ func NewRouter(serviceName string, authHandler *handlers.AuthHandler) http.Handl
 	healthHandler := handlers.NewHealthHandler(serviceName)
 
 	mux.HandleFunc("/health", healthHandler.Health)
-	mux.Handle("/metrics", middleware.MetricsHandler(serviceName))
+	// mux.Handle("/metrics", middleware.MetricsHandler(serviceName))
+	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/api/v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w, r)

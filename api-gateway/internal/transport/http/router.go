@@ -6,6 +6,8 @@ import (
 	"social-networking-platform/api-gateway/internal/config"
 	handlers "social-networking-platform/api-gateway/internal/handler/http"
 	"social-networking-platform/api-gateway/internal/middleware"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func NewRouter(cfg config.Config, proxyHandler *handlers.ProxyHandler) http.Handler {
@@ -14,7 +16,8 @@ func NewRouter(cfg config.Config, proxyHandler *handlers.ProxyHandler) http.Hand
 	healthHandler := handlers.NewHealthHandler(cfg.ServiceName)
 
 	mux.HandleFunc("/health", healthHandler.Health)
-	mux.Handle("/metrics", middleware.MetricsHandler(cfg.ServiceName))
+	// mux.Handle("/metrics", middleware.MetricsHandler(cfg.ServiceName))
+	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/api/v1/auth/", proxyHandler.ProxyAuth)
 	mux.HandleFunc("/api/v1/users/", proxyHandler.ProxyUsers)
 	mux.HandleFunc("/api/v1/posts", proxyHandler.ProxyPosts)
