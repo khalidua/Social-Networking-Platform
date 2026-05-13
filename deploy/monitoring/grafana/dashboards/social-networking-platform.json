@@ -234,6 +234,60 @@
       ],
       "title": "Scrape Target Health",
       "type": "timeseries"
+    },
+        {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "sum by (service, method, route) (rate(service_operations_total[1m]))",
+          "legendFormat": "{{ service }} {{ method }} {{ route }}"
+        }
+      ],
+      "title": "Service Operations Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "id": 10,
+      "targets": [
+        {
+          "expr": "sum by (service, operation) (rate(db_query_duration_seconds_count[1m]))",
+          "legendFormat": "{{ service }} {{ operation }}"
+        }
+      ],
+      "title": "Dependency Metric (DB Query Rate)",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",
