@@ -172,9 +172,12 @@ function Register-TestSession {
         expires_at = $expiresAt
     } | ConvertTo-Json -Compress
 
-    $redisResult = & docker exec -i snp-redis redis-cli SET "auth:sessions:$SessionID" $payload EX 3600
+    $redisKey = "auth:sessions:$SessionID"
+    $redisResult = $payload | docker exec -i snp-redis redis-cli -x SET $redisKey
     Assert-True ($LASTEXITCODE -eq 0) "Failed to seed Redis session for $UserID"
     Assert-True (($redisResult | Select-Object -Last 1) -eq "OK") "Unexpected Redis response while seeding session: $redisResult"
+    docker exec snp-redis redis-cli EXPIRE $redisKey 3600 | Out-Null
+    Assert-True ($LASTEXITCODE -eq 0) "Failed to set Redis session TTL for $UserID"
 }
 
 function Get-Items {
