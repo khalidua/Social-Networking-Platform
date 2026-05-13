@@ -1,0 +1,187 @@
+{
+    "metrics": {
+        "http_req_duration{expected_response:true}": {
+            "p(90)": 7.253173800000001,
+            "p(95)": 8.762521649999986,
+            "avg": 5.938003883146048,
+            "min": 3.483256,
+            "med": 5.3554865,
+            "max": 106.793614
+        },
+        "http_req_blocked": {
+            "avg": 0.009652211735330997,
+            "min": 0.0014,
+            "med": 0.0035,
+            "max": 8.640185,
+            "p(90)": 0.005201,
+            "p(95)": 0.006
+        },
+        "http_req_sending": {
+            "p(90)": 0.053602,
+            "p(95)": 0.060002,
+            "avg": 0.03078804644194765,
+            "min": 0.0066,
+            "med": 0.021201,
+            "max": 1.82468
+        },
+        "vus": {
+            "value": 1,
+            "min": 1,
+            "max": 20
+        },
+        "http_req_receiving": {
+            "avg": 0.11466858913857698,
+            "min": 0.029801,
+            "med": 0.1112045,
+            "max": 2.665315,
+            "p(90)": 0.153607,
+            "p(95)": 0.17241799999999985
+        },
+        "group_duration": {
+            "avg": 18.455920036704118,
+            "min": 12.364383,
+            "med": 16.7758435,
+            "max": 126.493918,
+            "p(90)": 22.4268353,
+            "p(95)": 27.40726364999999
+        },
+        "checks": {
+            "passes": 16020,
+            "fails": 0,
+            "thresholds": {
+                "rate>0.95": false
+            },
+            "value": 1
+        },
+        "http_req_failed": {
+            "fails": 8010,
+            "passes": 0,
+            "thresholds": {
+                "rate<0.05": false
+            },
+            "value": 0
+        },
+        "http_req_waiting": {
+            "min": 3.392451,
+            "med": 5.211823,
+            "max": 106.70321,
+            "p(90)": 7.070520500000001,
+            "p(95)": 8.577977449999997,
+            "avg": 5.792547247565532
+        },
+        "data_sent": {
+            "count": 4024575,
+            "rate": 26686.500615667668
+        },
+        "http_req_duration": {
+            "p(95)": 8.762521649999986,
+            "avg": 5.938003883146048,
+            "min": 3.483256,
+            "med": 5.3554865,
+            "max": 106.793614,
+            "p(90)": 7.253173800000001,
+            "thresholds": {
+                "p(95)<750": false
+            }
+        },
+        "http_reqs": {
+            "count": 8010,
+            "rate": 53.11340201921893
+        },
+        "http_req_connecting": {
+            "avg": 0.004789511735330836,
+            "min": 0,
+            "med": 0,
+            "max": 4.367695,
+            "p(90)": 0,
+            "p(95)": 0
+        },
+        "iteration_duration": {
+            "avg": 1019.1537581217242,
+            "min": 1012.784223,
+            "med": 1017.4984005,
+            "max": 1126.919385,
+            "p(90)": 1023.2199772,
+            "p(95)": 1028.00901725
+        },
+        "iterations": {
+            "count": 2670,
+            "rate": 17.704467339739644
+        },
+        "vus_max": {
+            "value": 20,
+            "min": 20,
+            "max": 20
+        },
+        "data_received": {
+            "count": 4577821,
+            "rate": 30355.012127967893
+        },
+        "http_req_tls_handshaking": {
+            "p(90)": 0,
+            "p(95)": 0,
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "max": 0
+        }
+    },
+    "root_group": {
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {
+            "gateway protected reads": {
+                "id": "bfe9679e1fa03e91388de367094d07a3",
+                "groups": {},
+                "checks": {
+                        "profile status is 200": {
+                            "path": "::gateway protected reads::profile status is 200",
+                            "id": "f298446f4b1328b6f53089ff266b8615",
+                            "passes": 2670,
+                            "fails": 0,
+                            "name": "profile status is 200"
+                        },
+                        "profile success envelope": {
+                            "passes": 2670,
+                            "fails": 0,
+                            "name": "profile success envelope",
+                            "path": "::gateway protected reads::profile success envelope",
+                            "id": "0bb6e023f8eca810e6e1dc9a65792c75"
+                        },
+                        "feed status is 200": {
+                            "fails": 0,
+                            "name": "feed status is 200",
+                            "path": "::gateway protected reads::feed status is 200",
+                            "id": "6873581ff9e6a611258f298e813b52f3",
+                            "passes": 2670
+                        },
+                        "feed success envelope": {
+                            "fails": 0,
+                            "name": "feed success envelope",
+                            "path": "::gateway protected reads::feed success envelope",
+                            "id": "cd5fc22f80973c5a11168c2945606a04",
+                            "passes": 2670
+                        },
+                        "notifications status is 200": {
+                            "name": "notifications status is 200",
+                            "path": "::gateway protected reads::notifications status is 200",
+                            "id": "cb800c22cd3d72ff8b26d13619d01660",
+                            "passes": 2670,
+                            "fails": 0
+                        },
+                        "notifications success envelope": {
+                            "name": "notifications success envelope",
+                            "path": "::gateway protected reads::notifications success envelope",
+                            "id": "e03d15e3e0e73e4dbe688291c9a856f4",
+                            "passes": 2670,
+                            "fails": 0
+                        }
+                    },
+                "name": "gateway protected reads",
+                "path": "::gateway protected reads"
+            }
+        },
+        "checks": {}
+    }
+}

@@ -24,7 +24,7 @@ export const options = {
 };
 
 function authHeaders() {
-  const token = TOKENS.length > 0 ? TOKENS[(__VU - 1) % TOKENS.length] : TOKEN;
+  const token = TOKENS.length > 0 ? TOKENS[(__VU + __ITER - 1) % TOKENS.length] : TOKEN;
   return {
     Authorization: `Bearer ${token}`,
     'X-Request-ID': `load-read-${__VU}-${__ITER}`,

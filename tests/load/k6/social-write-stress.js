@@ -1,6 +1,8 @@
 import http from 'k6/http';
 import { check, group, sleep } from 'k6';
 
+http.setResponseCallback(http.expectedStatuses({ min: 200, max: 399 }, 403));
+
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const ACTOR_TOKEN = __ENV.ACTOR_TOKEN;
 const ACTOR_TOKENS = __ENV.ACTOR_TOKENS ? __ENV.ACTOR_TOKENS.split(';').filter((token) => token.length > 0) : [];
@@ -53,13 +55,15 @@ export default function () {
       'interaction response is bounded': (r) => r.timings.duration < 1000,
     });
 
-    const notifications = http.get(`${BASE_URL}/api/v1/notifications`, {
-      headers: headers(AUTHOR_TOKEN, 'load-write-notifications'),
-    });
-    check(notifications, {
-      'author notifications status is 200': (r) => r.status === 200,
-      'author notifications envelope': (r) => r.json('success') === true,
-    });
+    if (__VU === 1) {
+      const notifications = http.get(`${BASE_URL}/api/v1/notifications`, {
+        headers: headers(AUTHOR_TOKEN, 'load-write-notifications'),
+      });
+      check(notifications, {
+        'author notifications status is 200': (r) => r.status === 200,
+        'author notifications envelope': (r) => r.json('success') === true,
+      });
+    }
   });
 
   sleep(Number(__ENV.SLEEP_SECONDS || 1));

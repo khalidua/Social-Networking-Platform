@@ -14,6 +14,21 @@ const (
 )
 
 var (
+	normalizedBusinessOperationDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "business_operation_duration_seconds",
+			Help:    "Execution time of service-level business operations.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"service", "operation"},
+	)
+	normalizedBusinessOperationTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "business_operation_total",
+			Help: "Total service-level business operations partitioned by operation and outcome.",
+		},
+		[]string{"service", "operation", "status"},
+	)
 	businessOperationDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "auth_service",
@@ -34,6 +49,8 @@ var (
 )
 
 func observeBusinessOperation(operation string, started time.Time, status string) {
+	normalizedBusinessOperationDuration.WithLabelValues("auth-service", operation).Observe(time.Since(started).Seconds())
+	normalizedBusinessOperationTotal.WithLabelValues("auth-service", operation, status).Inc()
 	businessOperationDuration.WithLabelValues(operation).Observe(time.Since(started).Seconds())
 	businessOperationTotal.WithLabelValues(status).Inc()
 }

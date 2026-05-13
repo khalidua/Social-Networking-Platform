@@ -50,6 +50,11 @@ type Config struct {
 
 	TrustProxyHeaders bool
 	RequireHTTPS      bool
+
+	DemoSimulationEnabled bool
+	DemoSimulationPath    string
+	DemoLatency           time.Duration
+	DemoFailureRate       float64
 }
 
 func Load() Config {
@@ -94,6 +99,10 @@ func Load() Config {
 
 	cfg.TrustProxyHeaders = getEnvBool("TRUST_PROXY_HEADERS", false)
 	cfg.RequireHTTPS = getEnvBool("REQUIRE_HTTPS", false)
+	cfg.DemoSimulationEnabled = getEnvBool("DEMO_SIMULATION_ENABLED", false)
+	cfg.DemoSimulationPath = getEnv("DEMO_SIMULATION_PATH", "/api/v1/feed")
+	cfg.DemoLatency = getDuration("DEMO_LATENCY", 0)
+	cfg.DemoFailureRate = getEnvFloat("DEMO_FAILURE_RATE", 0)
 	validate(cfg)
 	return cfg
 }
@@ -134,6 +143,12 @@ func validate(cfg Config) {
 	if cfg.RequireHTTPS && !cfg.TLSEnabled && !cfg.TrustProxyHeaders {
 		log.Fatal("REQUIRE_HTTPS=true requires either TLS_ENABLED=true or TRUST_PROXY_HEADERS=true")
 	}
+	if cfg.DemoFailureRate < 0 || cfg.DemoFailureRate > 1 {
+		log.Fatal("DEMO_FAILURE_RATE must be between 0 and 1")
+	}
+	if cfg.DemoSimulationEnabled && strings.TrimSpace(cfg.DemoSimulationPath) == "" {
+		log.Fatal("DEMO_SIMULATION_PATH is required when DEMO_SIMULATION_ENABLED=true")
+	}
 }
 
 func getEnv(key, fallback string) string {
@@ -164,6 +179,15 @@ func getDuration(key string, fallback time.Duration) time.Duration {
 func getEnvInt(key string, fallback int) int {
 	raw := getEnv(key, strconv.Itoa(fallback))
 	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+func getEnvFloat(key string, fallback float64) float64 {
+	raw := getEnv(key, strconv.FormatFloat(fallback, 'f', -1, 64))
+	value, err := strconv.ParseFloat(raw, 64)
 	if err != nil {
 		return fallback
 	}

@@ -13,7 +13,7 @@ This folder contains k6 scenarios that exercise the API Gateway and downstream s
 | Gateway read load | `tests/load/k6/gateway-read-load.js` | Exercises authenticated profile, feed, and notification reads through the gateway. |
 | Social write stress | `tests/load/k6/social-write-stress.js` | Exercises post interaction writes and notification reads through the gateway. |
 
-The PowerShell runner seeds valid JWT/Redis sessions for multiple users to avoid tripping the gateway per-user rate limiter during normal load runs.
+The PowerShell runner seeds valid JWT/Redis sessions for multiple users and rotates read tokens across iterations to avoid tripping the gateway per-user rate limiter during normal load runs.
 
 ## Prerequisites
 
@@ -96,8 +96,9 @@ Load and stress behavior for authenticated gateway reads and social write intera
 ## Edge Cases
 
 - Multiple test users are seeded so normal load is distributed across session identities.
+- Gateway read tokens rotate across a larger user pool than the VU count so the scenario measures service throughput instead of the per-user limiter.
 - The write stress script reuses a seed post and multiple actor users.
-- Async notification behavior is exercised through repeated notification reads after writes.
+- Async notification behavior is exercised through bounded author notification reads after writes.
 
 ## Failure Cases
 
@@ -106,6 +107,20 @@ Load and stress behavior for authenticated gateway reads and social write intera
 - Gateway auth/session contract breakage causes setup or k6 checks to fail.
 - Service latency/error regressions cause k6 thresholds to fail.
 - If setup waits on `GET /api/v1/users/me`, inspect `docker logs snp-users-service --tail 100` and `docker logs snp-api-gateway --tail 100`.
+
+## Observability Demo Runs
+
+Normal load runs should leave gateway demo simulation disabled. To demonstrate latency or failure panels, enable the gateway flags explicitly and restart only the gateway:
+
+```powershell
+$env:DEMO_SIMULATION_ENABLED="true"
+$env:DEMO_SIMULATION_PATH="/api/v1/feed"
+$env:DEMO_LATENCY="2s"
+$env:DEMO_FAILURE_RATE="0.3"
+docker compose -f deploy\compose\compose.yml up -d --build api-gateway
+```
+
+Disable the flags again before recording normal performance evidence.
 
 ## Regression Checks
 

@@ -26,3 +26,25 @@ func TestLoadReadsResilienceConfig(t *testing.T) {
 		t.Fatalf("CircuitBreakerOpenFor = %s, want 5s", cfg.CircuitBreakerOpenFor)
 	}
 }
+
+func TestLoadReadsDemoSimulationConfig(t *testing.T) {
+	t.Setenv("DEMO_SIMULATION_ENABLED", "true")
+	t.Setenv("DEMO_SIMULATION_PATH", "/api/v1/feed")
+	t.Setenv("DEMO_LATENCY", "150ms")
+	t.Setenv("DEMO_FAILURE_RATE", "0.25")
+
+	cfg := Load()
+
+	if !cfg.DemoSimulationEnabled {
+		t.Fatal("DemoSimulationEnabled = false, want true")
+	}
+	if cfg.DemoSimulationPath != "/api/v1/feed" {
+		t.Fatalf("DemoSimulationPath = %q", cfg.DemoSimulationPath)
+	}
+	if cfg.DemoLatency != 150*time.Millisecond {
+		t.Fatalf("DemoLatency = %s, want 150ms", cfg.DemoLatency)
+	}
+	if cfg.DemoFailureRate != 0.25 {
+		t.Fatalf("DemoFailureRate = %v, want 0.25", cfg.DemoFailureRate)
+	}
+}

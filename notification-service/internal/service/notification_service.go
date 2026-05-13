@@ -31,6 +31,11 @@ func NewService(repo postgres.NotificationRepository) *Service {
 }
 
 func (s *Service) GetNotifications(ctx context.Context, userID string) ([]domain.Notification, error) {
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("get_notifications", started, status)
+	}()
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return nil, ErrValidation
@@ -41,31 +46,48 @@ func (s *Service) GetNotifications(ctx context.Context, userID string) ([]domain
 		return nil, err
 	}
 	if notifications == nil {
+		status = businessStatusSuccess
 		return []domain.Notification{}, nil
 	}
+	status = businessStatusSuccess
 	return notifications, nil
 }
 
 func (s *Service) CreateFollowNotification(ctx context.Context, followerID string, followeeID string) error {
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("create_follow_notification", started, status)
+	}()
 	followerID = strings.TrimSpace(followerID)
 	followeeID = strings.TrimSpace(followeeID)
 	if followerID == "" || followeeID == "" {
 		return ErrValidation
 	}
 	if followerID == followeeID {
+		status = businessStatusSuccess
 		return nil
 	}
 
-	return s.repo.Save(ctx, domain.Notification{
+	if err := s.repo.Save(ctx, domain.Notification{
 		ID:      s.newID(),
 		UserID:  followeeID,
 		Type:    "follow",
 		Message: fmt.Sprintf("%s followed you", followerID),
 		Read:    false,
-	})
+	}); err != nil {
+		return err
+	}
+	status = businessStatusSuccess
+	return nil
 }
 
 func (s *Service) CreatePostInteractionNotification(ctx context.Context, postID string, postAuthorID string, actorID string, interactionType string) error {
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("create_post_interaction_notification", started, status)
+	}()
 	postID = strings.TrimSpace(postID)
 	postAuthorID = strings.TrimSpace(postAuthorID)
 	actorID = strings.TrimSpace(actorID)
@@ -74,19 +96,24 @@ func (s *Service) CreatePostInteractionNotification(ctx context.Context, postID 
 		return ErrValidation
 	}
 	if actorID == postAuthorID {
+		status = businessStatusSuccess
 		return nil
 	}
 	if interactionType != "like" {
 		return fmt.Errorf("unsupported interaction type: %w", ErrValidation)
 	}
 
-	return s.repo.Save(ctx, domain.Notification{
+	if err := s.repo.Save(ctx, domain.Notification{
 		ID:      s.newID(),
 		UserID:  postAuthorID,
 		Type:    "post_like",
 		Message: fmt.Sprintf("%s liked your post %s", actorID, postID),
 		Read:    false,
-	})
+	}); err != nil {
+		return err
+	}
+	status = businessStatusSuccess
+	return nil
 }
 
 func newNotificationID() string {

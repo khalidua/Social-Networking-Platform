@@ -12,11 +12,8 @@ env:
   GOTELEMETRY: "off"
 
 jobs:
-  # ─────────────────────────────────────────────
-  # 1. UNIT TESTS + COVERAGE (all services)
-  # ─────────────────────────────────────────────
   unit-tests:
-    name: Unit Tests & Coverage
+    name: Unit Tests and Coverage
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -28,88 +25,43 @@ jobs:
           - posts-service
           - feed-service
           - notification-service
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: ${{ matrix.service }}/go.sum
-
-      - name: Cache Go build cache
-        uses: actions/cache@v4
-        with:
-          path: .gocache
-          key: gocache-${{ matrix.service }}-${{ hashFiles(format('{0}/go.sum', matrix.service)) }}
-          restore-keys: gocache-${{ matrix.service }}-
-
       - name: Download modules
         working-directory: ${{ matrix.service }}
         run: go mod download
-
-      - name: Run unit tests with coverage
+      - name: Run tests with coverage
         working-directory: ${{ matrix.service }}
-        # Exclude integration packages (build-tagged or located in internal/integration)
         run: |
-          go test \
-            -v \
-            -race \
-            -covermode=atomic \
-            -coverprofile=coverage.out \
-            $(go list ./... | grep -v '/integration$') \
-            2>&1 | tee test-output.txt
+          go test -v -race -covermode=atomic -coverprofile=coverage.out $(go list ./... | grep -v '/integration$') 2>&1 | tee test-output.txt
           go tool cover -func=coverage.out | tee coverage-summary.txt
-
-      - name: Enforce 80 % coverage on core business logic
+      - name: Enforce service package coverage
         working-directory: ${{ matrix.service }}
         run: |
-          python3 - <<'EOF'
+          python3 - <<'PY'
           import subprocess, sys
-
-          result = subprocess.run(
-              ["go", "tool", "cover", "-func=coverage.out"],
-              capture_output=True, text=True
-          )
-
-          # Collect package-level totals for ./internal/service packages only.
-          # go tool cover -func emits a summary line per package:
-          #   social-networking-platform/auth-service/internal/service  (statements)  82.4%
-          # We enforce ≥80% on that total line, not on individual functions.
-          errors = []
-          found_service_pkg = False
+          result = subprocess.run(["go", "tool", "cover", "-func=coverage.out"], capture_output=True, text=True, check=True)
+          found = False
+          failures = []
           for line in result.stdout.splitlines():
-              if "/internal/service" not in line:
+              if "/internal/service" not in line or "(statements)" not in line:
                   continue
-              parts = line.split()
-              if not parts:
-                  continue
-              pct_str = parts[-1].rstrip("%")
-              try:
-                  pct = float(pct_str)
-              except ValueError:
-                  continue
-              # Only act on the package-total line (contains "(statements)")
-              if "(statements)" not in line:
-                  continue
-              found_service_pkg = True
-              print(f"  service package coverage: {pct:.1f}%  [{line.strip()}]")
-              if pct < 80.0:
-                  errors.append(f"service package below 80%: {pct:.1f}%")
-
-          if not found_service_pkg:
-              # No service package in this module (e.g. api-gateway) – skip
-              print("INFO: no internal/service package found – coverage gate skipped")
-          elif errors:
-              print("FAIL:", "; ".join(errors))
+              found = True
+              pct = float(line.split()[-1].rstrip("%"))
+              print(f"service package coverage: {pct:.1f}%")
+              if pct < 80:
+                  failures.append(f"{pct:.1f}%")
+          if failures:
+              print("FAIL: service package below 80% coverage: " + ", ".join(failures))
               sys.exit(1)
-          else:
-              print("PASS: service package meets ≥80% coverage target")
-          EOF
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+          if not found:
+              print("INFO: no internal/service package found; coverage gate skipped")
+          PY
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage-${{ matrix.service }}
@@ -119,55 +71,10 @@ jobs:
             ${{ matrix.service }}/test-output.txt
           retention-days: 14
 
-  # ─────────────────────────────────────────────
-  # 2. INTEGRATION TESTS (posts-service – in-memory, no DB)
-  # ─────────────────────────────────────────────
-  integration-tests-inmemory:
-    name: Integration Tests (in-memory)
+  integration-tests:
+    name: Integration Tests
     runs-on: ubuntu-latest
     needs: unit-tests
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: posts-service/go.sum
-
-      - name: Cache Go build cache
-        uses: actions/cache@v4
-        with:
-          path: .gocache
-          key: gocache-posts-integration-${{ hashFiles('posts-service/go.sum') }}
-          restore-keys: gocache-posts-integration-
-
-      - name: Download modules
-        working-directory: posts-service
-        run: go mod download
-
-      - name: Run integration tests (posts-service, in-memory repo)
-        working-directory: posts-service
-        run: |
-          go test -v -race ./internal/integration/... 2>&1 | tee integration-test-output.txt
-
-      - name: Upload integration test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: integration-tests-posts
-          path: posts-service/integration-test-output.txt
-          retention-days: 14
-
-  # ─────────────────────────────────────────────
-  # 3. INTEGRATION TESTS (users-service – real Postgres)
-  # ─────────────────────────────────────────────
-  integration-tests-db:
-    name: Integration Tests (Postgres)
-    runs-on: ubuntu-latest
-    needs: unit-tests
-
     services:
       users-db:
         image: postgres:16-alpine
@@ -182,355 +89,80 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: users-service/go.sum
-
-      - name: Cache Go build cache
-        uses: actions/cache@v4
-        with:
-          path: .gocache
-          key: gocache-users-integration-${{ hashFiles('users-service/go.sum') }}
-          restore-keys: gocache-users-integration-
-
-      - name: Download modules
-        working-directory: users-service
-        run: go mod download
-
-      - name: Run integration tests (users-service)
+      - name: Run posts in-memory integration tests
+        working-directory: posts-service
+        run: go test -v -race ./internal/integration/...
+      - name: Run users Postgres integration tests
         working-directory: users-service
         env:
           INTEGRATION_PG_DSN: "postgres://postgres:postgres@localhost:5433/users_db?sslmode=disable"
-        run: |
-          go test -v -race -tags integration ./internal/integration/... 2>&1 | tee integration-test-output.txt
+        run: go test -v -race -tags integration ./internal/integration/...
 
-      - name: Upload integration test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: integration-tests-users
-          path: users-service/integration-test-output.txt
-          retention-days: 14
-
-  # ─────────────────────────────────────────────
-  # 4. CONTRACT TESTS (OpenAPI + event schemas)
-  # ─────────────────────────────────────────────
   contract-tests:
     name: Contract Tests
     runs-on: ubuntu-latest
-    # Contract checks are pure file/schema validation – no service dependency
-
     steps:
       - uses: actions/checkout@v4
+      - name: Validate OpenAPI and event contracts
+        shell: pwsh
+        run: ./tests/contract/contract-validation.ps1
 
-      - name: Validate OpenAPI YAML is well-formed
-        run: |
-          python3 - <<'EOF'
-          import yaml, sys, pathlib
-
-          text = pathlib.Path("docs/openapi/swagger.yaml").read_text()
-          doc  = yaml.safe_load(text)
-
-          errors = []
-          if not doc.get("openapi", "").startswith("3."):
-              errors.append("Not OpenAPI 3.x")
-          if "paths" not in doc:
-              errors.append("Missing 'paths' key")
-          if "components" not in doc:
-              errors.append("Missing 'components' key")
-          if "openapi: 3.0.0" not in text:
-              errors.append("Missing 'openapi: 3.0.0' version string")
-
-          if errors:
-              for e in errors: print("FAIL:", e)
-              sys.exit(1)
-          print("PASS: swagger.yaml is valid YAML and OpenAPI 3.x")
-          EOF
-
-      - name: Validate JSON event schemas
-        run: |
-          python3 - <<'EOF'
-          import json, sys, pathlib
-
-          schemas_dir = pathlib.Path("docs/schemas")
-          required_schemas = [
-              "user-followed-v1.json",
-              "post-created-v1.json",
-              "post-interacted-v1.json",
-          ]
-          required_fields = {
-              "user-followed-v1.json":   ["follower_id", "followee_id"],
-              "post-created-v1.json":    ["post_id", "author_id", "content", "created_at"],
-              "post-interacted-v1.json": ["post_id", "post_author_id", "actor_id",
-                                         "interaction_type", "created_at"],
-          }
-
-          errors = []
-          for fname in required_schemas:
-              path = schemas_dir / fname
-              if not path.exists():
-                  errors.append(f"Missing schema file: {path}")
-                  continue
-              try:
-                  schema = json.loads(path.read_text())
-              except json.JSONDecodeError as e:
-                  errors.append(f"Invalid JSON in {fname}: {e}")
-                  continue
-              for field in required_fields[fname]:
-                  if field not in schema.get("required", []):
-                      errors.append(f"{fname}: missing required field '{field}'")
-                  if field not in schema.get("properties", {}):
-                      errors.append(f"{fname}: missing property definition '{field}'")
-              if schema.get("additionalProperties") is not False:
-                  errors.append(f"{fname}: must set additionalProperties=false")
-
-          if errors:
-              for e in errors:
-                  print("FAIL:", e)
-              sys.exit(1)
-          print("PASS: all event schemas valid")
-          EOF
-
-      - name: Validate event contracts doc references schemas and topics
-        run: |
-          python3 - <<'EOF'
-          import sys, pathlib
-
-          doc = pathlib.Path("docs/messaging/event-contracts.md").read_text()
-
-          topics  = ["user.followed", "post.created", "post.interacted"]
-          schemas = ["user-followed-v1.json", "post-created-v1.json", "post-interacted-v1.json"]
-          errors  = []
-
-          for item in topics + schemas:
-              if item not in doc:
-                  errors.append(f"event-contracts.md missing reference to '{item}'")
-
-          if errors:
-              for e in errors:
-                  print("FAIL:", e)
-              sys.exit(1)
-          print("PASS: event-contracts.md references all topics and schema files")
-          EOF
-
-      - name: Validate OpenAPI contains required paths and component schemas
-        run: |
-          python3 - <<'EOF'
-          import sys, pathlib, re
-
-          oas = pathlib.Path("docs/openapi/swagger.yaml").read_text()
-
-          required_schemas = [
-              "SuccessEnvelope", "ErrorEnvelope", "AuthUser",
-              "SessionValidationResponse", "User", "Post",
-              "PostInteraction", "Notification",
-          ]
-          required_paths = [
-              ("/health",                          "get"),
-              ("/api/v1/auth/login",               "get"),
-              ("/api/v1/auth/callback",            "get"),
-              ("/api/v1/auth/logout",              "post"),
-              ("/api/v1/auth/session",             "get"),
-              ("/api/v1/users/me",                 "get"),
-              ("/api/v1/users/me",                 "patch"),
-              ("/api/v1/users/{id}",               "get"),
-              ("/api/v1/users/{id}/follow",        "post"),
-              ("/api/v1/users/{id}/follow",        "delete"),
-              ("/api/v1/posts",                    "post"),
-              ("/api/v1/posts/{id}",               "get"),
-              ("/api/v1/posts/{id}",               "patch"),
-              ("/api/v1/posts/{id}",               "delete"),
-              ("/api/v1/posts/{id}/interactions",  "post"),
-              ("/api/v1/feed",                     "get"),
-              ("/api/v1/notifications",            "get"),
-          ]
-
-          errors = []
-          for name in required_schemas:
-              if f"    {name}:" not in oas:
-                  errors.append(f"OpenAPI missing component schema '{name}'")
-
-          for path, method in required_paths:
-              escaped = re.escape(path)
-              if not re.search(rf"^\s{{2}}{escaped}:", oas, re.MULTILINE):
-                  errors.append(f"OpenAPI missing path '{path}'")
-              # rough check: method should appear somewhere after the path
-              elif method + ":" not in oas:
-                  errors.append(f"OpenAPI path '{path}' missing method '{method}'")
-
-          if errors:
-              for e in errors:
-                  print("FAIL:", e)
-              sys.exit(1)
-          print("PASS: OpenAPI paths and component schemas verified")
-          EOF
-
-  # ─────────────────────────────────────────────
-  # 5. LOAD / STRESS SCRIPT VALIDATION
-  #    (validates k6 script syntax – no live stack)
-  # ─────────────────────────────────────────────
   load-test-validation:
-    name: Load & Stress Script Validation
+    name: Load Script Validation
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Validate k6 scripts via Docker (syntax check)
+      - name: Inspect k6 scripts
         run: |
-          # Use the official k6 Docker image – no apt repo needed
           for script in tests/load/k6/gateway-read-load.js tests/load/k6/social-write-stress.js; do
-            echo "Checking $script..."
-            docker run --rm \
-              -v "$PWD:/workspace" \
-              -w /workspace \
-              grafana/k6:0.53.0 \
-              inspect "$script"
-            echo "  OK: $script"
+            docker run --rm -v "$PWD:/workspace" -w /workspace grafana/k6:0.53.0 inspect "$script"
           done
-          echo "PASS: k6 scripts are syntactically valid"
+      - name: Validate runner wiring
+        shell: pwsh
+        run: ./tests/load/run-load-tests.ps1 -ValidateOnly
 
-      - name: Verify load test scripts have thresholds defined
-        run: |
-          python3 - <<'EOF'
-          import sys, pathlib
-
-          scripts = [
-              "tests/load/k6/gateway-read-load.js",
-              "tests/load/k6/social-write-stress.js",
-          ]
-          errors = []
-          for s in scripts:
-              content = pathlib.Path(s).read_text()
-              if "thresholds" not in content:
-                  errors.append(f"{s}: no 'thresholds' block found")
-              if "http_req_failed" not in content:
-                  errors.append(f"{s}: missing http_req_failed threshold")
-
-          if errors:
-              for e in errors:
-                  print("FAIL:", e)
-              sys.exit(1)
-          print("PASS: all k6 scripts define required thresholds")
-          EOF
-
-      - name: Verify PowerShell runner script exists and is runnable
-        run: |
-          test -f tests/load/run-load-tests.ps1 && echo "PASS: run-load-tests.ps1 present" \
-            || (echo "FAIL: missing tests/load/run-load-tests.ps1" && exit 1)
-
-  # ─────────────────────────────────────────────
-  # 6. BUILD VERIFICATION (all services compile)
-  # ─────────────────────────────────────────────
-  build:
-    name: Build Verification
+  build-and-artifacts:
+    name: Build and Artifact Validation
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Build all services
+      - name: Build and vet services
         run: |
           for svc in api-gateway auth-service users-service posts-service feed-service notification-service; do
-            echo "Building $svc..."
-            (cd $svc && go build ./cmd/server/...) || exit 1
+            (cd "$svc" && go build ./cmd/server/... && go vet ./...)
           done
-          echo "PASS: all services compile"
+      - name: Validate Docker Compose
+        run: docker compose -f deploy/compose/compose.yml config --quiet
 
-      - name: Vet all services
-        run: |
-          for svc in api-gateway auth-service users-service posts-service feed-service notification-service; do
-            echo "Vetting $svc..."
-            (cd $svc && go vet ./...) || exit 1
-          done
-          echo "PASS: all services pass go vet"
-
-  # ─────────────────────────────────────────────
-  # 7. ARTIFACT VALIDATION
-  #    (swagger.yaml, event schemas, docker configs)
-  # ─────────────────────────────────────────────
-  artifact-validation:
-    name: Artifact Validation
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Validate Docker Compose file
-        run: |
-          docker compose -f deploy/compose/compose.yml config --quiet
-          echo "PASS: compose.yml is valid"
-
-      - name: Check all Dockerfiles build (syntax only)
-        run: |
-          for svc in api-gateway auth-service users-service posts-service feed-service notification-service; do
-            echo "Checking Dockerfile for $svc..."
-            docker build --check $svc/ 2>/dev/null || \
-            docker buildx build --check $svc/ 2>/dev/null || \
-            hadolint $svc/Dockerfile 2>/dev/null || \
-            echo "  (skipping full lint – syntax verified via compose config)"
-          done
-
-      - name: Validate OpenAPI YAML is well-formed
-        run: |
-          python3 -c "
-          import yaml, sys
-          with open('docs/openapi/swagger.yaml') as f:
-              doc = yaml.safe_load(f)
-          assert doc.get('openapi', '').startswith('3.'), 'Not OpenAPI 3.x'
-          assert 'paths' in doc, 'Missing paths'
-          assert 'components' in doc, 'Missing components'
-          print('PASS: swagger.yaml is valid YAML and OpenAPI 3.x')
-          "
-
-      - name: Check event schema files exist
-        run: |
-          for f in docs/schemas/user-followed-v1.json \
-                   docs/schemas/post-created-v1.json \
-                   docs/schemas/post-interacted-v1.json; do
-            test -f "$f" && echo "PASS: $f" || (echo "FAIL: missing $f" && exit 1)
-          done
-
-  # ─────────────────────────────────────────────
-  # 8. FINAL STATUS GATE
-  # ─────────────────────────────────────────────
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
     needs:
       - unit-tests
-      - integration-tests-inmemory
-      - integration-tests-db
+      - integration-tests
       - contract-tests
       - load-test-validation
-      - build
-      - artifact-validation
+      - build-and-artifacts
     if: always()
-
     steps:
-      - name: Check all jobs passed
+      - name: Check required jobs
         run: |
-          results='${{ toJSON(needs) }}'
-          echo "$results" | python3 - <<'EOF'
-          import json, sys, os
-
-          results = json.loads(os.environ.get("RESULTS") or open("/dev/stdin").read())
-          failed = [name for name, r in results.items() if r["result"] not in ("success", "skipped")]
+          python3 - <<'PY'
+          import json, os, sys
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failed = [name for name, data in needs.items() if data["result"] != "success"]
           if failed:
-              print("FAIL: the following jobs did not pass:", ", ".join(failed))
+              print("FAIL: " + ", ".join(failed))
               sys.exit(1)
           print("PASS: all CI jobs passed")
-          EOF
+          PY
         env:
-          RESULTS: ${{ toJSON(needs) }}
+          NEEDS_JSON: ${{ toJSON(needs) }}

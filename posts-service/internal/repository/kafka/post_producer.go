@@ -82,12 +82,14 @@ func NewKafkaPostProducer(brokersCSV string, postCreatedTopic string, postIntera
 		Addr:                   kafkago.TCP(brokers...),
 		Topic:                  postCreatedTopic,
 		Balancer:               &kafkago.LeastBytes{},
+		BatchTimeout:           10 * time.Millisecond,
 		AllowAutoTopicCreation: true,
 	}
 	interactedWriter := &kafkago.Writer{
 		Addr:                   kafkago.TCP(brokers...),
 		Topic:                  postInteractedTopic,
 		Balancer:               &kafkago.LeastBytes{},
+		BatchTimeout:           10 * time.Millisecond,
 		AllowAutoTopicCreation: true,
 	}
 

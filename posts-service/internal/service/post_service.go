@@ -52,6 +52,11 @@ func NewPostService(repo postgres.PostRepository, publisher postkafka.PostProduc
 }
 
 func (s *postService) CreatePost(ctx context.Context, authorID string, content string) (*domain.Post, error) {
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("create_post", started, status)
+	}()
 	trimmedAuthorID := strings.TrimSpace(authorID)
 	trimmedContent := strings.TrimSpace(content)
 	if err := validatePostContent(trimmedContent); err != nil {
@@ -71,18 +76,44 @@ func (s *postService) CreatePost(ctx context.Context, authorID string, content s
 		log.Printf("posts-service: kafka publish post.created: %v", err)
 	}
 
+	status = businessStatusSuccess
 	return post, nil
 }
 
 func (s *postService) GetPost(ctx context.Context, id string) (*domain.Post, error) {
-	return s.repo.GetPostByID(ctx, strings.TrimSpace(id))
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("get_post", started, status)
+	}()
+	post, err := s.repo.GetPostByID(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return nil, err
+	}
+	status = businessStatusSuccess
+	return post, nil
 }
 
 func (s *postService) ListPostsByAuthor(ctx context.Context, authorID string) ([]domain.Post, error) {
-	return s.repo.GetPostsByAuthor(ctx, strings.TrimSpace(authorID))
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("list_posts_by_author", started, status)
+	}()
+	posts, err := s.repo.GetPostsByAuthor(ctx, strings.TrimSpace(authorID))
+	if err != nil {
+		return nil, err
+	}
+	status = businessStatusSuccess
+	return posts, nil
 }
 
 func (s *postService) UpdatePost(ctx context.Context, requesterID string, postID string, content string) (*domain.Post, error) {
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("update_post", started, status)
+	}()
 	trimmedRequesterID := strings.TrimSpace(requesterID)
 	trimmedContent := strings.TrimSpace(content)
 	if err := validatePostContent(trimmedContent); err != nil {
@@ -108,10 +139,16 @@ func (s *postService) UpdatePost(ctx context.Context, requesterID string, postID
 		return nil, err
 	}
 
+	status = businessStatusSuccess
 	return post, nil
 }
 
 func (s *postService) DeletePost(ctx context.Context, requesterID string, postID string) error {
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("delete_post", started, status)
+	}()
 	post, err := s.repo.GetPostByID(ctx, strings.TrimSpace(postID))
 	if err != nil {
 		return err
@@ -130,10 +167,16 @@ func (s *postService) DeletePost(ctx context.Context, requesterID string, postID
 		return err
 	}
 
+	status = businessStatusSuccess
 	return nil
 }
 
 func (s *postService) InteractWithPost(ctx context.Context, actorID string, postID string, interactionType string) (*domain.PostInteraction, error) {
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("interact_with_post", started, status)
+	}()
 	trimmedActorID := strings.TrimSpace(actorID)
 	trimmedPostID := strings.TrimSpace(postID)
 	trimmedType := strings.TrimSpace(strings.ToLower(interactionType))
@@ -169,6 +212,7 @@ func (s *postService) InteractWithPost(ctx context.Context, actorID string, post
 		log.Printf("posts-service: kafka publish post.interacted: %v", err)
 	}
 
+	status = businessStatusSuccess
 	return &interaction, nil
 }
 

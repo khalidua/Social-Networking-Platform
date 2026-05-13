@@ -1,85 +1,52 @@
-# Monitoring & metrics
+# Monitoring And Metrics
 
-## Initial behavior
+## Runtime Endpoints
 
-* each service exposes Prometheus metrics at `/metrics`
-* endpoint uses `promhttp.Handler()` (standard Prometheus library)
-* metrics include Go runtime (`go_*`, `process_*`) and custom application metrics
+Every gateway/service process exposes Prometheus metrics at `/metrics` through `promhttp.Handler()`.
 
-## Common metrics (present in every service)
+## HTTP Metrics
 
-* `http_requests_total` – counter with labels:
-  * `service`
-  * `method`
-  * `route`
-  * `status`
-  * `status_group` (`2xx`, `4xx`, `5xx`, `other`)
-* `http_request_duration_seconds` – histogram with buckets:
-  * `0.1`, `0.3`, `0.5`, `1`, `2`, `5` seconds
-  * same labels as `http_requests_total`
-* `http_requests_active` – gauge (label: `service`)
-* `service_operations_total` – counter (same labels as requests)
+- `http_requests_total{service,method,route,status,status_group}`
+- `http_request_duration_seconds{service,method,route,status,status_group}`
+- `http_requests_active{service}`
+- `service_operations_total{service,method,route,status,status_group}` for backward-compatible route/status operation counting
 
-## Service endpoints (inside Docker network)
+Route labels are grouped and must remain low-cardinality.
 
-* `api-gateway` – port `8080`
-* `auth-service` – port `8081`
-* `users-service` – port `8082`
-* `posts-service` – port `8083`
-* `feed-service` – port `8084`
-* `notification-service` – port `8085`
+## Business Metrics
 
-## Prometheus configuration example
+Service-layer code emits:
 
-Add to `prometheus.yml`:
+- `business_operation_duration_seconds{service,operation}`
+- `business_operation_total{service,operation,status}`
 
-```yaml
-scrape_configs:
-  - job_name: 'api-gateway'
-    static_configs:
-      - targets: ['api-gateway:8080']
-  - job_name: 'auth-service'
-    static_configs:
-      - targets: ['auth-service:8081']
-  - job_name: 'users-service'
-    static_configs:
-      - targets: ['users-service:8082']
-  - job_name: 'posts-service'
-    static_configs:
-      - targets: ['posts-service:8083']
-  - job_name: 'feed-service'
-    static_configs:
-      - targets: ['feed-service:8084']
-  - job_name: 'notification-service'
-    static_configs:
-      - targets: ['notification-service:8085']
-```
+Representative operations include auth callback, profile update, follow/unfollow, post CRUD/interaction, feed reads, and notification creation/listing.
 
-## Verifying metrics
+## Dependency Metrics
 
-* from host (if ports published):
-  ```bash
-  curl http://localhost:8080/metrics | grep http_requests_total
-  ```
-* from inside a container:
-  ```bash
-  docker exec <container_name> curl http://<service>:<port>/metrics
-  ```
+PostgreSQL repositories emit:
 
-## Grafana queries example
+- `db_query_duration_seconds{service,operation}`
+- `db_errors_total{service,operation}`
 
-* request rate: `rate(http_requests_total[5m])`
-* error rate (5xx): `rate(http_requests_total{status_group="5xx"}[5m])`
-* p99 latency: `histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))`
-* active requests: `http_requests_active`
+Expected no-row lookups are not counted as dependency errors.
 
+## Dashboard Queries
 
-## Example of: Check metrics directly from a service
+- Request rate: `sum by (service) (rate(http_requests_total[5m]))`
+- 5xx error rate: `sum by (service) (rate(http_requests_total{status=~"5.."}[5m])) / clamp_min(sum by (service) (rate(http_requests_total[5m])), 1)`
+- p95/p99 latency: `histogram_quantile(0.95, sum by (service, le) (rate(http_request_duration_seconds_bucket[5m])))`
+- Business operation rate: `sum by (service, operation, status) (rate(business_operation_total[1m]))`
+- DB query rate: `sum by (service, operation) (rate(db_query_duration_seconds_count[1m]))`
+- DB errors: `sum by (service, operation) (rate(db_errors_total[1m]))`
 
-```bash
-# From host (if ports are mapped)
-curl http://localhost:8080/metrics | grep http_requests_total
+## Demo Simulation
 
-# Inside Docker network
-docker exec -it api-gateway curl http://api-gateway:8080/metrics
-```
+The API Gateway can inject demo-only latency and failures when explicitly enabled:
+
+- `DEMO_SIMULATION_ENABLED=true`
+- `DEMO_SIMULATION_PATH=/api/v1/feed`
+- `DEMO_LATENCY=2s`
+- `DEMO_FAILURE_RATE=0.3`
+
+These flags are disabled by default and should only be used for observability demonstrations.

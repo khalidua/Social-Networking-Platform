@@ -3,6 +3,7 @@ package service
 import (
 	"log"
 	"sync"
+	"time"
 
 	"social-networking-platform/feed-service/internal/domain"
 	"social-networking-platform/feed-service/internal/repository/redis"
@@ -13,9 +14,9 @@ type FeedService interface {
 }
 
 type FeedResult struct {
-	Items      []domain.FeedItem
-	Degraded   bool
-	Stale      bool
+	Items    []domain.FeedItem
+	Degraded bool
+	Stale    bool
 }
 
 type feedService struct {
@@ -29,14 +30,19 @@ func NewFeedService(
 	repo redis.FeedRepository,
 ) FeedService {
 	return &feedService{
-	repo:     repo,
-	fallback: make(map[string][]domain.FeedItem),
+		repo:     repo,
+		fallback: make(map[string][]domain.FeedItem),
 	}
 }
 
 func (s *feedService) GetFeed(
 	userID string,
 ) (FeedResult, error) {
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("get_feed", started, status)
+	}()
 	feed, err := s.repo.GetFeed(userID)
 	// Redis succeeded
 	if err == nil {
@@ -46,6 +52,7 @@ func (s *feedService) GetFeed(
 		s.fallback[userID] = feed
 		s.fallbackMu.Unlock()
 
+		status = businessStatusSuccess
 		return FeedResult{
 			Items:    feed,
 			Degraded: false,
@@ -66,6 +73,7 @@ func (s *feedService) GetFeed(
 			err,
 		)
 
+		status = businessStatusSuccess
 		return FeedResult{
 			Items:    cachedFeed,
 			Degraded: true,

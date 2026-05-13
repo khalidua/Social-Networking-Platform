@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"social-networking-platform/users-service/internal/domain"
@@ -66,6 +67,11 @@ func validation(msg string) error {
 }
 
 func (s *userService) GetMe(ctx context.Context, userID string) (*domain.User, error) {
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("get_me", started, status)
+	}()
 	if strings.TrimSpace(userID) == "" {
 		return nil, errors.New("missing user id")
 	}
@@ -79,10 +85,16 @@ func (s *userService) GetMe(ctx context.Context, userID string) (*domain.User, e
 			return nil, err
 		}
 	}
+	status = businessStatusSuccess
 	return u, nil
 }
 
 func (s *userService) UpdateMe(ctx context.Context, userID string, name *string, bio *string, profilePicture *string) (*domain.User, error) {
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("update_me", started, status)
+	}()
 	if strings.TrimSpace(userID) == "" {
 		return nil, errors.New("missing user id")
 	}
@@ -105,6 +117,7 @@ func (s *userService) UpdateMe(ctx context.Context, userID string, name *string,
 	if err := s.users.Save(ctx, *u); err != nil {
 		return nil, err
 	}
+	status = businessStatusSuccess
 	return u, nil
 }
 
@@ -140,6 +153,11 @@ func (s *userService) ensureUser(ctx context.Context, id string) error {
 }
 
 func (s *userService) FollowUser(ctx context.Context, followerID, followeeID string) error {
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("follow_user", started, status)
+	}()
 	if strings.TrimSpace(followerID) == "" || strings.TrimSpace(followeeID) == "" {
 		return errors.New("missing user id")
 	}
@@ -162,24 +180,44 @@ func (s *userService) FollowUser(ctx context.Context, followerID, followeeID str
 			log.Printf("users-service: kafka publish user.followed: %v", err)
 		}
 	}
+	status = businessStatusSuccess
 	return nil
 }
 
 func (s *userService) UnfollowUser(ctx context.Context, followerID, followeeID string) error {
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("unfollow_user", started, status)
+	}()
 	if strings.TrimSpace(followerID) == "" || strings.TrimSpace(followeeID) == "" {
 		return errors.New("missing user id")
 	}
 	if followerID == followeeID {
 		return ErrCannotFollowSelf
 	}
-	return s.follows.Unfollow(ctx, domain.Follow{FollowerID: followerID, FolloweeID: followeeID})
+	if err := s.follows.Unfollow(ctx, domain.Follow{FollowerID: followerID, FolloweeID: followeeID}); err != nil {
+		return err
+	}
+	status = businessStatusSuccess
+	return nil
 }
 
 func (s *userService) ListFollowerIDs(ctx context.Context, followeeID string) ([]string, error) {
+	started := time.Now()
+	status := businessStatusFailure
+	defer func() {
+		observeBusinessOperation("list_follower_ids", started, status)
+	}()
 	if strings.TrimSpace(followeeID) == "" {
 		return nil, errors.New("missing user id")
 	}
-	return s.follows.ListFollowerIDs(ctx, followeeID)
+	ids, err := s.follows.ListFollowerIDs(ctx, followeeID)
+	if err != nil {
+		return nil, err
+	}
+	status = businessStatusSuccess
+	return ids, nil
 }
 
 type StubUserService struct{}

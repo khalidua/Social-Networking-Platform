@@ -31,7 +31,14 @@ func NewRouter(cfg config.Config, proxyHandler *handlers.ProxyHandler) http.Hand
 				middleware.RequireHTTPS(cfg.RequireHTTPS, cfg.TrustProxyHeaders)(
 					middleware.Logging(cfg.ServiceName)(
 						middleware.Metrics(cfg.ServiceName)(
-							middleware.Recovery(cfg.ServiceName)(mux),
+							middleware.DemoSimulation(middleware.DemoSimulationOptions{
+								Enabled:     cfg.DemoSimulationEnabled,
+								PathPrefix:  cfg.DemoSimulationPath,
+								Latency:     cfg.DemoLatency,
+								FailureRate: cfg.DemoFailureRate,
+							})(
+								middleware.Recovery(cfg.ServiceName)(mux),
+							),
 						),
 					),
 				),

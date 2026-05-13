@@ -112,10 +112,14 @@
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum by (service, le) (rate(http_request_duration_seconds_bucket[5m])))",
-          "legendFormat": "{{ service }}"
+          "legendFormat": "p95 {{ service }}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (service, le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{ service }}"
         }
       ],
-      "title": "p95 Latency by Service",
+      "title": "p95 / p99 Latency by Service",
       "type": "timeseries"
     },
     {
@@ -255,11 +259,11 @@
       "id": 9,
       "targets": [
         {
-          "expr": "sum by (service, method, route) (rate(service_operations_total[1m]))",
-          "legendFormat": "{{ service }} {{ method }} {{ route }}"
+          "expr": "sum by (service, operation, status) (rate(business_operation_total[1m]))",
+          "legendFormat": "{{ service }} {{ operation }} {{ status }}"
         }
       ],
-      "title": "Service Operations Rate",
+      "title": "Business Operations Rate",
       "type": "timeseries"
     },
     {
@@ -287,6 +291,33 @@
         }
       ],
       "title": "Dependency Metric (DB Query Rate)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 40
+      },
+      "id": 11,
+      "targets": [
+        {
+          "expr": "sum by (service, operation) (rate(db_errors_total[1m]))",
+          "legendFormat": "{{ service }} {{ operation }}"
+        }
+      ],
+      "title": "Dependency Errors (DB)",
       "type": "timeseries"
     }
   ],

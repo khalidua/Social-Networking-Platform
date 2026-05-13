@@ -348,7 +348,7 @@ try {
     $runID = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     $readUsers = @()
     $actorUsers = @()
-    $readUserCount = [Math]::Max($ReadVus, 1)
+    $readUserCount = [Math]::Max($ReadVus * 3, 1)
     $actorUserCount = [Math]::Max($WriteVus, 1)
 
     for ($i = 1; $i -le $readUserCount; $i++) {

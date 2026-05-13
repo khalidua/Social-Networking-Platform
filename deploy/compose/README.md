@@ -1,186 +1,97 @@
+# Local Compose Runtime
 
-# Local Compose Baseline
+This folder contains the runnable local deployment for the Social Networking Platform.
 
-This Compose file starts the local Social Networking Platform baseline:
+## Services
 
-- API Gateway
-- Auth Service
-- Users Service
-- Posts Service
-- Feed Service
-- Notification Service
-- Kafka + Zookeeper
-- Redis
-- PostgreSQL per DB-backed service
+- API Gateway: `8080`
+- Auth Service: `8081`
+- Users Service: `8082`
+- Posts Service: `8083`
+- Feed Service: `8084`
+- Notification Service: `8085`
+- Redis: `6379`
+- Kafka host listener: `9092`
+- Prometheus: `9090`
+- Grafana: `3000`
+- Loki: `3100`
+- PostgreSQL host ports: `5433`, `5434`, `5435`
 
-## Run
+## Environment
 
-From this folder:
+Copy the example file and fill local-only secrets when using real Google OAuth:
 
-```bash
-docker compose up --build
-````
+```powershell
+Copy-Item deploy\compose\.env.example deploy\compose\.env
+```
+
+Do not commit real Google client secrets. Dummy defaults let the stack start, but the real browser OAuth callback requires valid Google credentials and redirect URL configuration.
+
+## Start
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\scripts\up.ps1 -Build
+```
+
+Equivalent raw command:
+
+```powershell
+docker compose -f deploy\compose\compose.yml up -d --build
+```
+
+## Health Check
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\scripts\health.ps1
+```
+
+## Logs
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\scripts\logs.ps1
+powershell -ExecutionPolicy Bypass -File deploy\scripts\logs.ps1 -Service api-gateway
+```
 
 ## Stop
 
-```bash
-docker compose down
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\scripts\down.ps1
 ```
 
-## Remove containers + volumes
+## Reset Volumes
 
-```bash
-docker compose down -v
-```
-
-## Service Ports
-
-* API Gateway: 8080
-* Auth Service: 8081
-* Users Service: 8082
-* Posts Service: 8083
-* Feed Service: 8084
-* Notification Service: 8085
-* Redis: 6379
-* Kafka: 9092
-* Zookeeper: 2181
-* Users DB: 5433
-* Posts DB: 5434
-* Notifications DB: 5435
-
----
-
-# How to run it
-
-Go to:
+This deletes databases, Redis state, and observability storage:
 
 ```powershell
-cd "\Social-Networking-Platform\deploy\compose"
-````
+powershell -ExecutionPolicy Bypass -File deploy\scripts\reset.ps1 -ConfirmVolumeDelete
+```
 
-Copy env file if needed:
+## Demo Simulation
+
+The API Gateway includes disabled-by-default demo simulation flags for observability validation:
 
 ```powershell
-Copy-Item .env.example .env
+$env:DEMO_SIMULATION_ENABLED="true"
+$env:DEMO_SIMULATION_PATH="/api/v1/feed"
+$env:DEMO_LATENCY="2s"
+$env:DEMO_FAILURE_RATE="0.3"
+docker compose -f deploy\compose\compose.yml up -d --build api-gateway
 ```
 
-Then run:
+Set `DEMO_SIMULATION_ENABLED=false` or unset the variables for normal behavior.
+
+## Test Harnesses
+
+Deterministic integration and load tests seed JWT/Redis sessions instead of depending on external Google OAuth:
 
 ```powershell
-docker compose up --build
+powershell -ExecutionPolicy Bypass -File tests\integration\e2e\e2e-user-flow.ps1 -StartStack
+powershell -ExecutionPolicy Bypass -File tests\load\run-load-tests.ps1 -K6Runner docker
 ```
 
----
+## Troubleshooting
 
-# How to smoke-test after startup
-
-In another terminal:
-
-## Gateway
-
-```powershell
-curl http://localhost:8080/health
-```
-
-## Auth
-
-```powershell
-curl http://localhost:8081/health
-```
-
-## Users
-
-```powershell
-curl http://localhost:8082/health
-```
-
-## Posts
-
-```powershell
-curl http://localhost:8083/health
-```
-
-## Feed
-
-```powershell
-curl http://localhost:8084/health
-```
-
-## Notifications
-
-```powershell
-curl http://localhost:8085/health
-```
-
-Expected shape:
-
-```json
-{"status":"ok","service":"..."}
-```
-
----
-
-# Acceptance criteria mapping
-
-## Acceptance criteria
-
-**“full stack starts locally with one command”**
-
-This is satisfied if:
-
-```powershell
-docker compose up --build
-```
-
-successfully starts:
-
-* infra containers
-* service containers
-* all service `/health` routes respond
-
----
-
-# Notes about current scaffold
-
-Because your current code is scaffold-only:
-
-* services should start
-* `/health` should work
-* placeholder routes will still return `501`
-
-That is fine for this issue. This issue is about:
-
-* Dockerfiles
-* container startup
-* local integration baseline
-
-not full business functionality yet.
-
----
-
-# Common Windows troubleshooting
-
-## If Docker says a port is busy
-
-Stop the process using that port or change the host-side port mapping.
-
-Example:
-
-```yaml
-ports:
-  - "18080:8080"
-```
-
-## If Docker Desktop is broken
-
-Make sure Docker Desktop is running before:
-
-```powershell
-docker compose up --build
-```
-
-## If Kafka acts slow on first boot
-
-Give it a minute. Kafka/Zookeeper often take longer than the Go services.
-
----
+- Container name conflicts: run `docker compose -f deploy\compose\compose.yml down` for this project before starting again.
+- Port conflicts: stop the process using the host port or edit the host-side port mapping.
+- Kafka first boot: wait for health checks and consumers to settle before judging feed/notification fan-out.
+- OAuth `invalid_client`: verify `.env` values and Google Console redirect URI.

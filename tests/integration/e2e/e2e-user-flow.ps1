@@ -140,6 +140,9 @@ function Wait-Health {
 
     Wait-Until -Description "healthy $Path" -Condition {
         $result = Invoke-JsonRequest -Method GET -Path $Path -ExpectedStatus @(200)
+        if ($result.body.PSObject.Properties.Name -contains "data") {
+            return $result.body.data.status -eq "ok"
+        }
         return $result.body.status -eq "ok"
     }
 }
@@ -153,6 +156,9 @@ function Wait-DirectHealth {
             return $false
         }
         $body = $response.Content | ConvertFrom-Json
+        if ($body.PSObject.Properties.Name -contains "data") {
+            return $body.data.status -eq "ok"
+        }
         return $body.status -eq "ok"
     }
 }

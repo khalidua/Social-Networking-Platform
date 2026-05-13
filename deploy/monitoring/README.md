@@ -37,6 +37,10 @@ Each Go HTTP service exposes:
 - `http_request_duration_seconds`
 - `http_requests_active`
 - `service_operations_total`
+- `business_operation_duration_seconds`
+- `business_operation_total`
+- `db_query_duration_seconds`
+- `db_errors_total`
 
 Labels are intentionally low-cardinality:
 
@@ -44,6 +48,8 @@ Labels are intentionally low-cardinality:
 - `method`
 - `route`
 - `status`
+- `status_group`
+- `operation`
 
 Do not add labels containing user ids, request ids, emails, session ids, tokens, or raw paths with resource ids.
 
@@ -68,5 +74,9 @@ Useful Prometheus expressions:
 up
 sum by (service) (rate(http_requests_total[5m]))
 histogram_quantile(0.95, sum by (service, le) (rate(http_request_duration_seconds_bucket[5m])))
+histogram_quantile(0.99, sum by (service, le) (rate(http_request_duration_seconds_bucket[5m])))
+sum by (service, operation, status) (rate(business_operation_total[1m]))
+sum by (service, operation) (rate(db_query_duration_seconds_count[1m]))
+sum by (service, operation) (rate(db_errors_total[1m]))
 kafka_consumergroup_lag
 ```
